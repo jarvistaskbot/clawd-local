@@ -91,6 +91,6 @@ async def handle_message(user_id: int, message: str) -> str:
     add_message(session_id, "assistant", response)
 
     if was_optimized:
-        response += "\n\n_[prompt optimized by OpenAI]_"
+        pass  # optimization is silent
 
     return response
