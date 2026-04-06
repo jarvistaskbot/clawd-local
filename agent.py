@@ -1,8 +1,13 @@
+import asyncio
 import subprocess
 
-from config import CLAUDE_CLI_PATH, CLAUDE_MODEL, CLAUDE_TIMEOUT, MAX_HISTORY_MESSAGES, WORKSPACE_DIR
+from config import (
+    CLAUDE_CLI_PATH, CLAUDE_MODEL, CLAUDE_TIMEOUT,
+    MAX_HISTORY_MESSAGES, WORKSPACE_DIR, OPENAI_ENABLED,
+)
 from memory import get_or_create_session, add_message, get_history
 from context import get_context
+from optimizer import optimize_prompt
 
 MAX_PROMPT_LENGTH = 10000
 
@@ -66,14 +71,26 @@ def call_claude(prompt: str) -> str:
         return f"Unexpected error calling Claude CLI: {e}"
 
 
-def handle_message(user_id: int, message: str) -> str:
+async def handle_message(user_id: int, message: str) -> str:
     message = sanitize_prompt(message)
     if not message.strip():
         return "Empty prompt. Please send a message with some content."
+
     session_id = get_or_create_session(user_id)
     history = get_history(session_id, limit=MAX_HISTORY_MESSAGES)
-    prompt = format_prompt(history, message)
-    response = call_claude(prompt)
+
+    # Optimize prompt via OpenAI
+    optimized = await optimize_prompt(message)
+    was_optimized = OPENAI_ENABLED and optimized != message
+
+    prompt = format_prompt(history, optimized)
+    loop = asyncio.get_event_loop()
+    response = await loop.run_in_executor(None, call_claude, prompt)
+
     add_message(session_id, "user", message)
     add_message(session_id, "assistant", response)
+
+    if was_optimized:
+        response += "\n\n_[prompt optimized by OpenAI]_"
+
     return response

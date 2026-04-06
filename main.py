@@ -10,10 +10,15 @@ from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS, CLAUDE_CLI_PATH, CLAUDE_MODEL
+from config import (
+    TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS, TELEGRAM_CHAT_ID,
+    CLAUDE_CLI_PATH, CLAUDE_MODEL, OPENAI_ENABLED, OPENAI_MODEL,
+)
 from memory import init_db, get_or_create_session, get_history, reset_session, get_stats
 from agent import handle_message
 from context import get_context, MEMORY_DIR, CONTEXT_FILES
+from queue_manager import queue_manager, QueueFullError
+from watchdog import run_watchdog, check_claude_health, is_healthy, setup_log_rotation
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -22,6 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _last_activity: Optional[str] = None
+_start_time: Optional[datetime] = None
 
 
 def is_allowed(user_id: int) -> bool:
@@ -79,6 +85,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/reset - Start a fresh conversation\n"
         "/history - Show recent messages\n"
         "/stats - Show session statistics\n"
+        "/status - System health status\n"
         "/stop - Shut down the bot\n"
         "/restart - Restart the bot\n"
         "/help - Show this help"
@@ -95,6 +102,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/reset - Start a fresh conversation\n"
         "/history - Show recent messages\n"
         "/stats - Show session statistics\n"
+        "/status - System health status\n"
         "/stop - Shut down the bot\n"
         "/restart - Restart the bot\n"
         "/help - Show this help\n\n"
@@ -172,6 +180,31 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
+        return
+
+    claude_status = "✅ Healthy" if is_healthy() else "❌ Unhealthy"
+    openai_status = f"✅ Enabled ({OPENAI_MODEL})" if OPENAI_ENABLED else "❌ Disabled"
+    pending = queue_manager.pending_count
+
+    uptime_str = "unknown"
+    if _start_time:
+        delta = datetime.now(timezone.utc) - _start_time
+        hours, remainder = divmod(int(delta.total_seconds()), 3600)
+        minutes = remainder // 60
+        uptime_str = f"{hours}h {minutes}m"
+
+    await update.message.reply_text(
+        "System Status\n\n"
+        f"Bot: ✅ Running\n"
+        f"Claude CLI: {claude_status}\n"
+        f"OpenAI: {openai_status}\n"
+        f"Queue: {pending} items pending\n"
+        f"Uptime: {uptime_str}"
+    )
+
+
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global _last_activity
     if not is_allowed(update.effective_user.id):
@@ -182,11 +215,17 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, handle_message, user_id, text)
+
+        pending = queue_manager.pending_count
+        if pending > 0:
+            await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
+
+        response = await queue_manager.enqueue_prompt(user_id, text, handle_message)
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
             await update.message.reply_text(chunk)
+    except QueueFullError:
+        await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
         logger.exception("Error handling message")
         await update.message.reply_text(f"Something went wrong: {e}")
@@ -216,11 +255,29 @@ async def context_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 
+async def _send_telegram_alert(text: str):
+    """Send a watchdog alert via Telegram."""
+    from telegram import Bot
+    if TELEGRAM_CHAT_ID:
+        bot = Bot(token=TELEGRAM_BOT_TOKEN)
+        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text)
+
+
 def main():
+    global _start_time
+
     if not TELEGRAM_BOT_TOKEN:
         print("Error: TELEGRAM_BOT_TOKEN not set. Copy .env.example to .env and configure it.")
         return
+
+    # Set up log rotation
+    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    setup_log_rotation(log_dir)
+
     init_db()
+    _start_time = datetime.now(timezone.utc)
+
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
@@ -230,8 +287,17 @@ def main():
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("history", history_command))
     app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("context", context_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+
+    async def post_init(application):
+        queue_manager.start()
+        asyncio.create_task(run_watchdog(interval_seconds=60, send_alert=_send_telegram_alert))
+        logger.info("Queue manager and watchdog started.")
+
+    app.post_init = post_init
+
     logger.info("Bot started. Polling for messages...")
     app.run_polling()
 

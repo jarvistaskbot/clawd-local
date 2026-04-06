@@ -72,6 +72,7 @@ def test_prompt_sanitization():
 
 def test_empty_prompt_rejected():
     """Empty prompts return an error message instead of calling Claude."""
+    import asyncio
     import tempfile
     import config
     import memory
@@ -84,10 +85,10 @@ def test_empty_prompt_rejected():
     memory.init_db()
 
     try:
-        result = handle_message(999, "")
+        result = asyncio.get_event_loop().run_until_complete(handle_message(999, ""))
         assert "empty" in result.lower()
 
-        result = handle_message(999, "\x00\x00")
+        result = asyncio.get_event_loop().run_until_complete(handle_message(999, "\x00\x00"))
         assert "empty" in result.lower()
     finally:
         config.DB_PATH = orig_db
