@@ -94,12 +94,32 @@ async def process_image(local_path: str, caption: str = "") -> str:
 
 
 async def transcribe_audio(local_path: str) -> str:
-    """Transcribe audio using OpenAI Whisper API."""
+    """Transcribe audio using OpenAI Whisper API.
+    Converts .oga/.ogg (Telegram Opus) to .wav first for better Whisper accuracy.
+    """
     if not OPENAI_API_KEY:
         return "Could not transcribe audio: OpenAI API key not configured"
+
+    # Convert to WAV for better Whisper accuracy (.oga Opus can degrade quality)
+    wav_path = local_path.rsplit('.', 1)[0] + '_converted.wav'
+    converted = False
+    try:
+        import subprocess as sp
+        result = sp.run(
+            ['ffmpeg', '-y', '-i', local_path, '-ar', '16000', '-ac', '1', '-f', 'wav', wav_path],
+            capture_output=True, timeout=30
+        )
+        if result.returncode == 0:
+            transcribe_path = wav_path
+            converted = True
+        else:
+            transcribe_path = local_path
+    except Exception:
+        transcribe_path = local_path
+
     try:
         client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-        with open(local_path, "rb") as audio_file:
+        with open(transcribe_path, "rb") as audio_file:
             transcript = await client.audio.transcriptions.create(
                 model=WHISPER_MODEL,
                 file=audio_file,
@@ -109,6 +129,9 @@ async def transcribe_audio(local_path: str) -> str:
     except Exception as e:
         logger.exception("Audio transcription failed")
         return f"Could not transcribe audio: {e}"
+    finally:
+        if converted:
+            cleanup_temp_file(wav_path)
 
 
 async def extract_video_frame(video_path: str) -> Optional[str]:
