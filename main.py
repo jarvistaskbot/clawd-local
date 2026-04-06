@@ -19,6 +19,11 @@ from agent import handle_message
 from context import get_context, MEMORY_DIR, CONTEXT_FILES
 from queue_manager import queue_manager, QueueFullError
 from watchdog import run_watchdog, check_claude_health, is_healthy, setup_log_rotation
+from media_handler import (
+    download_telegram_file, process_image, transcribe_audio,
+    extract_video_frame, cleanup_temp_file, is_text_file, is_image_file,
+    read_text_file,
+)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -231,6 +236,151 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Something went wrong: {e}")
 
 
+async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global _last_activity
+    if not is_allowed(update.effective_user.id):
+        return
+    user_id = update.effective_user.id
+    local_path = None
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+        photo = update.message.photo[-1]  # highest resolution
+        local_path = await download_telegram_file(context.bot, photo.file_id, suffix=".jpg")
+        caption = update.message.caption or ""
+        prompt = await process_image(local_path, caption)
+
+        pending = queue_manager.pending_count
+        if pending > 0:
+            await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
+
+        response = await queue_manager.enqueue_prompt(user_id, prompt, handle_message)
+        _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        for chunk in split_message(response):
+            await update.message.reply_text(chunk)
+    except QueueFullError:
+        await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
+    except Exception as e:
+        logger.exception("Error handling photo")
+        await update.message.reply_text(f"Something went wrong: {e}")
+    finally:
+        if local_path:
+            cleanup_temp_file(local_path)
+
+
+async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global _last_activity
+    if not is_allowed(update.effective_user.id):
+        return
+    user_id = update.effective_user.id
+    local_path = None
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+        voice = update.message.voice or update.message.audio
+        local_path = await download_telegram_file(context.bot, voice.file_id, suffix=".ogg")
+        transcription = await transcribe_audio(local_path)
+        await update.message.reply_text(f"🎤 Transcribed: {transcription}")
+
+        pending = queue_manager.pending_count
+        if pending > 0:
+            await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
+
+        response = await queue_manager.enqueue_prompt(user_id, transcription, handle_message)
+        _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        for chunk in split_message(response):
+            await update.message.reply_text(chunk)
+    except QueueFullError:
+        await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
+    except Exception as e:
+        logger.exception("Error handling voice message")
+        await update.message.reply_text(f"Something went wrong: {e}")
+    finally:
+        if local_path:
+            cleanup_temp_file(local_path)
+
+
+async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global _last_activity
+    if not is_allowed(update.effective_user.id):
+        return
+    user_id = update.effective_user.id
+    local_path = None
+    frame_path = None
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+        video = update.message.video or update.message.video_note
+        local_path = await download_telegram_file(context.bot, video.file_id, suffix=".mp4")
+        frame_path = await extract_video_frame(local_path)
+
+        if frame_path is None:
+            await update.message.reply_text(
+                "Video received but ffmpeg not installed for frame extraction. "
+                "Please send a screenshot instead."
+            )
+            return
+
+        caption = update.message.caption or ""
+        prompt = await process_image(frame_path, caption)
+
+        pending = queue_manager.pending_count
+        if pending > 0:
+            await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
+
+        response = await queue_manager.enqueue_prompt(user_id, prompt, handle_message)
+        _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        for chunk in split_message(response):
+            await update.message.reply_text(chunk)
+    except QueueFullError:
+        await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
+    except Exception as e:
+        logger.exception("Error handling video")
+        await update.message.reply_text(f"Something went wrong: {e}")
+    finally:
+        if local_path:
+            cleanup_temp_file(local_path)
+        if frame_path:
+            cleanup_temp_file(frame_path)
+
+
+async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global _last_activity
+    if not is_allowed(update.effective_user.id):
+        return
+    user_id = update.effective_user.id
+    local_path = None
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+        doc = update.message.document
+        filename = doc.file_name or "unknown"
+
+        if is_image_file(filename):
+            local_path = await download_telegram_file(context.bot, doc.file_id, suffix=os.path.splitext(filename)[1])
+            caption = update.message.caption or ""
+            prompt = await process_image(local_path, caption)
+        elif is_text_file(filename):
+            local_path = await download_telegram_file(context.bot, doc.file_id, suffix=os.path.splitext(filename)[1])
+            prompt = await read_text_file(local_path, filename)
+        else:
+            await update.message.reply_text(f"Document type not supported: {filename}")
+            return
+
+        pending = queue_manager.pending_count
+        if pending > 0:
+            await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
+
+        response = await queue_manager.enqueue_prompt(user_id, prompt, handle_message)
+        _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        for chunk in split_message(response):
+            await update.message.reply_text(chunk)
+    except QueueFullError:
+        await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
+    except Exception as e:
+        logger.exception("Error handling document")
+        await update.message.reply_text(f"Something went wrong: {e}")
+    finally:
+        if local_path:
+            cleanup_temp_file(local_path)
+
+
 async def context_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
@@ -290,6 +440,10 @@ def main():
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("context", context_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, voice_handler))
+    app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, video_handler))
+    app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
 
     async def post_init(application):
         queue_manager.start()

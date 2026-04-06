@@ -33,3 +33,8 @@ CLAUDE_MAX_CONCURRENCY = int(os.getenv("CLAUDE_MAX_CONCURRENCY", "1"))
 # Log rotation
 LOG_ROTATION_MAX_BYTES = int(os.getenv("LOG_ROTATION_MAX_BYTES", "10485760"))
 LOG_ROTATION_BACKUP_COUNT = int(os.getenv("LOG_ROTATION_BACKUP_COUNT", "5"))
+
+# Media handling
+MEDIA_TEMP_DIR = os.getenv("MEDIA_TEMP_DIR", os.path.expanduser("~/clawd-local/media_temp"))
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "whisper-1")
+MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
