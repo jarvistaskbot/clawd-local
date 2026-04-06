@@ -56,15 +56,16 @@ def estimate_timeout(prompt: str) -> int:
     # Medium tasks — summaries, explanations, edits
     medium_keywords = [
         "summarize", "explain", "describe", "compare", "list", "what is",
-        "how does", "translate", "fix", "debug", "improve", "edit"
+        "how does", "translate", "fix", "debug", "improve", "edit",
+        "check", "verify", "review", "look at", "okay", "is it", "any issues"
     ]
 
     if any(kw in text for kw in heavy_keywords) or length > 2000:
-        return 480  # 8 minutes for heavy tasks
-    elif any(kw in text for kw in medium_keywords) or length > 500:
-        return 180  # 3 minutes for medium tasks
+        return 600  # 10 minutes for heavy tasks
+    elif any(kw in text for kw in medium_keywords) or length > 200:
+        return 300  # 5 minutes for medium tasks
     else:
-        return 60   # 1 minute for simple questions
+        return 180  # 3 minutes minimum for all tasks
 
 
 def call_claude(prompt: str, timeout: int = None) -> str:
