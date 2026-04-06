@@ -103,7 +103,7 @@ async def transcribe_audio(local_path: str) -> str:
             transcript = await client.audio.transcriptions.create(
                 model=WHISPER_MODEL,
                 file=audio_file,
-                # No language lock — Whisper auto-detects (supports English, Armenian, Russian, etc.)
+                language="en",  # Force English — prevents Whisper Turkish hallucination bug
             )
         return transcript.text
     except Exception as e:
