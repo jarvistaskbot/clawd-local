@@ -79,13 +79,21 @@ async def handle_message(user_id: int, message: str, skip_optimize: bool = False
     session_id = get_or_create_session(user_id)
     history = get_history(session_id, limit=MAX_HISTORY_MESSAGES)
 
-    # Optimize prompt via OpenAI only when user explicitly requests it with !opt prefix
+    # Optimize prompt via OpenAI only when user explicitly asks for it
+    # Triggers: message contains "create a prompt", "create prompt", or starts with "prompt:"
     # All other messages go directly to Claude as-is to preserve natural conversation flow
-    OPT_TRIGGER = "!opt "
+    msg_lower = message.lower()
+    wants_optimization = (
+        "create a prompt" in msg_lower or
+        "create prompt" in msg_lower or
+        "generate a prompt" in msg_lower or
+        "generate prompt" in msg_lower or
+        msg_lower.startswith("prompt:")
+    )
     if skip_optimize:
         optimized = message
-    elif message.lower().startswith(OPT_TRIGGER):
-        optimized = await optimize_prompt(message[len(OPT_TRIGGER):])
+    elif wants_optimization:
+        optimized = await optimize_prompt(message)
     else:
         optimized = message
 
