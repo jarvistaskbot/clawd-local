@@ -72,6 +72,27 @@ def test_session_reset():
     assert s3 == s2
 
 
+def test_clear_last_messages():
+    session_id = memory.get_or_create_session(777)
+    for i in range(10):
+        memory.add_message(session_id, "user", f"msg {i}")
+    deleted = memory.clear_last_messages(session_id, 3)
+    assert deleted == 3
+    history = memory.get_history(session_id)
+    assert len(history) == 7
+    # Last remaining message should be msg 6
+    assert history[-1]["content"] == "msg 6"
+
+
+def test_clear_more_than_exists():
+    session_id = memory.get_or_create_session(888)
+    memory.add_message(session_id, "user", "only one")
+    deleted = memory.clear_last_messages(session_id, 100)
+    assert deleted == 1
+    history = memory.get_history(session_id)
+    assert len(history) == 0
+
+
 def test_stats():
     user_id = 666
     s1 = memory.get_or_create_session(user_id)

@@ -92,6 +92,23 @@ def reset_session(user_id: int) -> int:
     return session_id
 
 
+def clear_last_messages(session_id: int, count: int = 5) -> int:
+    """Delete the last N messages from current session. Returns how many deleted."""
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT id FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+        (session_id, count),
+    ).fetchall()
+    deleted = len(rows)
+    if deleted > 0:
+        ids = [r["id"] for r in rows]
+        placeholders = ",".join("?" * len(ids))
+        conn.execute(f"DELETE FROM messages WHERE id IN ({placeholders})", ids)
+        conn.commit()
+    conn.close()
+    return deleted
+
+
 def get_stats(user_id: int) -> dict:
     conn = _connect()
     session_count = conn.execute(

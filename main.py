@@ -3,6 +3,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -14,7 +15,7 @@ from config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS, TELEGRAM_CHAT_ID,
     CLAUDE_CLI_PATH, CLAUDE_MODEL, OPENAI_ENABLED, OPENAI_MODEL,
 )
-from memory import init_db, get_or_create_session, get_history, reset_session, get_stats
+from memory import init_db, get_or_create_session, get_history, reset_session, get_stats, clear_last_messages
 from agent import handle_message
 
 async def handle_message_direct(user_id: int, message: str) -> str:
@@ -84,6 +85,14 @@ def split_message(text: str, max_len: int = 4096) -> list[str]:
     return chunks
 
 
+async def safe_reply(message, text: str):
+    """Send with MarkdownV2, fall back to plain text if parsing fails."""
+    try:
+        await message.reply_text(text, parse_mode="MarkdownV2")
+    except Exception:
+        await message.reply_text(text)
+
+
 def _check_claude_cli() -> str:
     try:
         result = subprocess.run(
@@ -131,7 +140,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Available commands:\n\n"
         "/start - Bot status and diagnostics\n"
         "/models - List available Claude models\n"
+        "/new - Start new session (history preserved)\n"
         "/reset - Start a fresh conversation\n"
+        "/clear [N] - Remove last N messages from context (default 5)\n"
         "/history - Show recent messages\n"
         "/stats - Show session statistics\n"
         "/status - System health status\n"
@@ -180,6 +191,32 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     reset_session(user_id)
     await update.message.reply_text("Conversation reset. Starting fresh!")
+
+
+async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
+        return
+    user_id = update.effective_user.id
+    reset_session(user_id)
+    await update.message.reply_text(
+        "🆕 New session started. Previous history preserved but not active in this session."
+    )
+
+
+async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
+        return
+    user_id = update.effective_user.id
+    count = 5
+    if context.args:
+        try:
+            count = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("Usage: /clear [N] — N must be a number.")
+            return
+    session_id = get_or_create_session(user_id)
+    deleted = clear_last_messages(session_id, count)
+    await update.message.reply_text(f"🗑 Cleared last {deleted} messages from context.")
 
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -237,6 +274,54 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def _run_with_progress(update, context, coro):
+    """Run a coroutine with typing indicator and progress updates for long tasks."""
+    stop_typing = asyncio.Event()
+    progress_msg = None
+    start = time.time()
+
+    async def keep_typing_and_progress():
+        nonlocal progress_msg
+        intervals = [30, 60, 120, 180, 240]
+        next_idx = 0
+        while not stop_typing.is_set():
+            try:
+                await context.bot.send_chat_action(
+                    chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+            except Exception:
+                pass
+            # Check if we should show/update progress
+            elapsed = time.time() - start
+            if next_idx < len(intervals) and elapsed >= intervals[next_idx]:
+                next_idx += 1
+                elapsed_int = int(elapsed)
+                label = f"{elapsed_int // 60}min" if elapsed_int >= 120 else f"{elapsed_int}s"
+                try:
+                    if progress_msg is None:
+                        progress_msg = await update.message.reply_text(f"⏳ Still working... ({label})")
+                    else:
+                        await progress_msg.edit_text(f"⏳ Still working... ({label})")
+                except Exception:
+                    pass
+            try:
+                await asyncio.wait_for(asyncio.shield(stop_typing.wait()), timeout=4.0)
+            except asyncio.TimeoutError:
+                pass
+
+    typing_task = asyncio.create_task(keep_typing_and_progress())
+    try:
+        result = await coro
+    finally:
+        stop_typing.set()
+        typing_task.cancel()
+        if progress_msg:
+            try:
+                await progress_msg.delete()
+            except Exception:
+                pass
+    return result
+
+
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global _last_activity
     if not is_allowed(update.effective_user.id):
@@ -245,35 +330,25 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if not text:
         return
+
+    # Reply-to-message context
+    if update.message.reply_to_message and update.message.reply_to_message.text:
+        quoted = update.message.reply_to_message.text[:500]
+        text = f"[Replying to: {quoted}]\n\n{text}"
+
     try:
         pending = queue_manager.pending_count
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        # Keep sending typing indicator every 4s while Claude processes
-        stop_typing = asyncio.Event()
-        async def keep_typing():
-            while not stop_typing.is_set():
-                try:
-                    await context.bot.send_chat_action(
-                        chat_id=update.effective_chat.id, action=ChatAction.TYPING)
-                except Exception:
-                    pass
-                try:
-                    await asyncio.wait_for(asyncio.shield(stop_typing.wait()), timeout=4.0)
-                except asyncio.TimeoutError:
-                    pass
-        typing_task = asyncio.create_task(keep_typing())
-
-        try:
-            response = await queue_manager.enqueue_prompt(user_id, text, handle_message)
-        finally:
-            stop_typing.set()
-            typing_task.cancel()
+        response = await _run_with_progress(
+            update, context,
+            queue_manager.enqueue_prompt(user_id, text, handle_message)
+        )
 
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
-            await update.message.reply_text(chunk)
+            await safe_reply(update.message, chunk)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -297,13 +372,13 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await run_with_typing(
-            context.bot, update.effective_chat.id,
+        response = await _run_with_progress(
+            update, context,
             queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct)
         )
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
-            await update.message.reply_text(chunk)
+            await safe_reply(update.message, chunk)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -331,10 +406,10 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await run_with_typing(context.bot, update.effective_chat.id, queue_manager.enqueue_prompt(user_id, transcription, handle_message_direct))
+        response = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, transcription, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
-            await update.message.reply_text(chunk)
+            await safe_reply(update.message, chunk)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -372,10 +447,10 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await run_with_typing(context.bot, update.effective_chat.id, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
+        response = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
-            await update.message.reply_text(chunk)
+            await safe_reply(update.message, chunk)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -414,10 +489,10 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await run_with_typing(context.bot, update.effective_chat.id, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
+        response = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
-            await update.message.reply_text(chunk)
+            await safe_reply(update.message, chunk)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -482,6 +557,8 @@ def main():
     app.add_handler(CommandHandler("stop", stop_command))
     app.add_handler(CommandHandler("restart", restart_command))
     app.add_handler(CommandHandler("reset", reset_command))
+    app.add_handler(CommandHandler("new", new_command))
+    app.add_handler(CommandHandler("clear", clear_command))
     app.add_handler(CommandHandler("history", history_command))
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("status", status_command))

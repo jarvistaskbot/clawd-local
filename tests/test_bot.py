@@ -97,6 +97,25 @@ def test_stop_command_sends_message():
         mock_exit.assert_called_once_with(0)
 
 
+def test_safe_reply_fallback_on_markdown_error():
+    """safe_reply falls back to plain text when MarkdownV2 fails."""
+    import asyncio
+    import main
+    importlib.reload(main)
+
+    message = MagicMock()
+    # First call (MarkdownV2) raises, second call (plain) succeeds
+    message.reply_text = AsyncMock(side_effect=[Exception("Can't parse MarkdownV2"), None])
+
+    asyncio.get_event_loop().run_until_complete(main.safe_reply(message, "hello `world"))
+    assert message.reply_text.await_count == 2
+    # First call had parse_mode, second did not
+    first_call = message.reply_text.call_args_list[0]
+    assert first_call.kwargs.get("parse_mode") == "MarkdownV2"
+    second_call = message.reply_text.call_args_list[1]
+    assert "parse_mode" not in second_call.kwargs
+
+
 def test_restart_command_sends_message():
     """restart_command sends 'Restarting...' then calls os.execv."""
     os.environ["TELEGRAM_ALLOWED_USERS"] = "111,222,333"
