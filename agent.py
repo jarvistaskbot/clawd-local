@@ -79,11 +79,15 @@ async def handle_message(user_id: int, message: str, skip_optimize: bool = False
     session_id = get_or_create_session(user_id)
     history = get_history(session_id, limit=MAX_HISTORY_MESSAGES)
 
-    # Optimize prompt via OpenAI (skip for media — send directly to Claude)
+    # Optimize prompt via OpenAI only when user explicitly requests it with !opt prefix
+    # All other messages go directly to Claude as-is to preserve natural conversation flow
+    OPT_TRIGGER = "!opt "
     if skip_optimize:
         optimized = message
+    elif message.lower().startswith(OPT_TRIGGER):
+        optimized = await optimize_prompt(message[len(OPT_TRIGGER):])
     else:
-        optimized = await optimize_prompt(message)
+        optimized = message
 
     prompt = format_prompt(history, optimized)
     loop = asyncio.get_event_loop()
