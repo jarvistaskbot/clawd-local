@@ -3,6 +3,18 @@ import subprocess
 from config import CLAUDE_CLI_PATH, CLAUDE_MODEL, CLAUDE_TIMEOUT, MAX_HISTORY_MESSAGES, WORKSPACE_DIR
 from memory import get_or_create_session, add_message, get_history
 
+MAX_PROMPT_LENGTH = 10000
+
+
+def sanitize_prompt(text: str) -> str:
+    text = text.replace("\x00", "")
+    text = text[:MAX_PROMPT_LENGTH]
+    return text
+
+
+def escape_backticks(text: str) -> str:
+    return text.replace("```", "\\`\\`\\`")
+
 
 def format_prompt(history: list[dict], current_message: str) -> str:
     parts = []
@@ -10,10 +22,10 @@ def format_prompt(history: list[dict], current_message: str) -> str:
         parts.append("[Previous conversation:]")
         for msg in history:
             label = "Human" if msg["role"] == "user" else "Assistant"
-            parts.append(f"{label}: {msg['content']}")
+            parts.append(f"{label}: {escape_backticks(msg['content'])}")
         parts.append("")
     parts.append("[Current message:]")
-    parts.append(f"Human: {current_message}")
+    parts.append(f"Human: {escape_backticks(current_message)}")
     return "\n".join(parts)
 
 
@@ -48,6 +60,9 @@ def call_claude(prompt: str) -> str:
 
 
 def handle_message(user_id: int, message: str) -> str:
+    message = sanitize_prompt(message)
+    if not message.strip():
+        return "Empty prompt. Please send a message with some content."
     session_id = get_or_create_session(user_id)
     history = get_history(session_id, limit=MAX_HISTORY_MESSAGES)
     prompt = format_prompt(history, message)

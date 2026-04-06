@@ -4,7 +4,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent import format_prompt, call_claude
+from agent import format_prompt, call_claude, sanitize_prompt, handle_message
 from config import CLAUDE_CLI_PATH
 
 
@@ -57,3 +57,39 @@ def test_format_prompt_with_history():
     assert "Assistant: hello there" in result
     assert "[Current message:]" in result
     assert "Human: how are you?" in result
+
+
+def test_prompt_sanitization():
+    """Null bytes are stripped and length is capped."""
+    result = sanitize_prompt("hello\x00world")
+    assert "\x00" not in result
+    assert result == "helloworld"
+
+    long_text = "a" * 20000
+    result = sanitize_prompt(long_text)
+    assert len(result) == 10000
+
+
+def test_empty_prompt_rejected():
+    """Empty prompts return an error message instead of calling Claude."""
+    import tempfile
+    import config
+    import memory
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    orig_db = config.DB_PATH
+    config.DB_PATH = path
+    memory.DB_PATH = path
+    memory.init_db()
+
+    try:
+        result = handle_message(999, "")
+        assert "empty" in result.lower()
+
+        result = handle_message(999, "\x00\x00")
+        assert "empty" in result.lower()
+    finally:
+        config.DB_PATH = orig_db
+        memory.DB_PATH = orig_db
+        os.unlink(path)

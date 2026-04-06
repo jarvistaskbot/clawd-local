@@ -1,10 +1,16 @@
+import asyncio
 import logging
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from typing import Optional
 
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS, CLAUDE_CLI_PATH, CLAUDE_MODEL
 from memory import init_db, get_or_create_session, get_history, reset_session, get_stats
 from agent import handle_message
 
@@ -13,6 +19,8 @@ logging.basicConfig(
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
+
+_last_activity: Optional[str] = None
 
 
 def is_allowed(user_id: int) -> bool:
@@ -37,17 +45,92 @@ def split_message(text: str, max_len: int = 4096) -> list[str]:
     return chunks
 
 
+def _check_claude_cli() -> str:
+    try:
+        result = subprocess.run(
+            [CLAUDE_CLI_PATH, "--version"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return f"available ({result.stdout.strip()})"
+    except Exception:
+        pass
+    return "unavailable"
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
+    user_id = update.effective_user.id
+    session_id = get_or_create_session(user_id)
+    history = get_history(session_id)
+    cli_status = _check_claude_cli()
+    last = _last_activity or "no activity yet"
     await update.message.reply_text(
-        "Welcome to clawd-local!\n\n"
-        "Send me any message and I'll process it through Claude Code CLI.\n\n"
+        "clawd-local status\n\n"
+        f"Bot running: OK\n"
+        f"Claude CLI: {cli_status}\n"
+        f"Memory: {len(history)} messages in current session\n"
+        f"Last activity: {last}\n\n"
         "Commands:\n"
+        "/start - Bot status\n"
+        "/models - List available models\n"
         "/reset - Start a fresh conversation\n"
         "/history - Show recent messages\n"
-        "/stats - Show session statistics"
+        "/stats - Show session statistics\n"
+        "/stop - Shut down the bot\n"
+        "/restart - Restart the bot\n"
+        "/help - Show this help"
     )
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
+        return
+    await update.message.reply_text(
+        "Available commands:\n\n"
+        "/start - Bot status and diagnostics\n"
+        "/models - List available Claude models\n"
+        "/reset - Start a fresh conversation\n"
+        "/history - Show recent messages\n"
+        "/stats - Show session statistics\n"
+        "/stop - Shut down the bot\n"
+        "/restart - Restart the bot\n"
+        "/help - Show this help\n\n"
+        "Send any text message to chat with Claude."
+    )
+
+
+async def models_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
+        return
+    models = [
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "claude-haiku-3-5",
+    ]
+    lines = ["Available models:\n"]
+    for m in models:
+        marker = " (current)" if m == CLAUDE_MODEL else ""
+        lines.append(f"  - {m}{marker}")
+    lines.append(f"\nConfigured model: {CLAUDE_MODEL}")
+    await update.message.reply_text("\n".join(lines))
+
+
+async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
+        return
+    await update.message.reply_text("Shutting down...")
+    logger.info("Stop command received. Exiting.")
+    os._exit(0)
+
+
+async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
+        return
+    await update.message.reply_text("Restarting...")
+    logger.info("Restart command received. Re-executing process.")
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -89,6 +172,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global _last_activity
     if not is_allowed(update.effective_user.id):
         return
     user_id = update.effective_user.id
@@ -97,7 +181,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
-        response = handle_message(user_id, text)
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, handle_message, user_id, text)
+        _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
             await update.message.reply_text(chunk)
     except Exception as e:
@@ -112,6 +198,10 @@ def main():
     init_db()
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("models", models_command))
+    app.add_handler(CommandHandler("stop", stop_command))
+    app.add_handler(CommandHandler("restart", restart_command))
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("history", history_command))
     app.add_handler(CommandHandler("stats", stats_command))
