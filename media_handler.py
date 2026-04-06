@@ -58,23 +58,39 @@ async def download_telegram_file(bot, file_id: str, suffix: str = "") -> str:
 
 
 async def process_image(local_path: str, caption: str = "") -> str:
-    """Build a prompt with base64-encoded image for Claude to analyze."""
+    """Analyze image using OpenAI Vision API (gpt-4o), then return description as prompt.
+    Claude CLI --print doesn't support vision, so we use OpenAI for image analysis.
+    """
     import base64
     import mimetypes
+    caption_part = f"\nUser caption: {caption}" if caption else ""
+
+    if not OPENAI_API_KEY:
+        return f"User sent an image (OpenAI key not set for vision analysis).{caption_part}"
+
     try:
         mime_type = mimetypes.guess_type(local_path)[0] or "image/jpeg"
         with open(local_path, "rb") as f:
             b64_data = base64.b64encode(f.read()).decode("utf-8")
-        caption_part = f"\nUser caption: {caption}" if caption else ""
-        return (
-            f"[Image attached as base64 {mime_type}]\n"
-            f"data:{mime_type};base64,{b64_data}\n"
-            f"Please analyze this image and describe what you see.{caption_part}"
+
+        client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_data}"}},
+                    {"type": "text", "text": f"Describe this image in detail.{caption_part}"}
+                ]
+            }],
+            max_tokens=500
         )
+        description = response.choices[0].message.content
+        # Return description as the prompt for Claude
+        return f"[Image analyzed by vision AI]\n{description}{caption_part}"
     except Exception as e:
-        logger.error("Failed to encode image: %s", e)
-        caption_part = f"\nCaption: {caption}" if caption else ""
-        return f"User sent an image (could not encode: {e}).{caption_part}"
+        logger.error("Image vision analysis failed: %s", e)
+        return f"User sent an image (vision analysis failed: {e}).{caption_part}"
 
 
 async def transcribe_audio(local_path: str) -> str:
