@@ -42,30 +42,8 @@ def format_prompt(history: list[dict], current_message: str) -> str:
 
 
 def estimate_timeout(prompt: str) -> int:
-    """Dynamically estimate timeout based on task complexity."""
-    text = prompt.lower()
-    length = len(prompt)
-
-    # Heavy tasks — code generation, analysis, long docs
-    heavy_keywords = [
-        "build", "create", "implement", "develop", "write a", "generate",
-        "refactor", "rewrite", "analyze", "audit", "review", "explain in detail",
-        "step by step", "full", "complete", "entire", "architecture",
-        "script", "function", "class", "module", "algorithm"
-    ]
-    # Medium tasks — summaries, explanations, edits
-    medium_keywords = [
-        "summarize", "explain", "describe", "compare", "list", "what is",
-        "how does", "translate", "fix", "debug", "improve", "edit",
-        "check", "verify", "review", "look at", "okay", "is it", "any issues"
-    ]
-
-    if any(kw in text for kw in heavy_keywords) or length > 2000:
-        return 600  # 10 minutes for heavy tasks
-    elif any(kw in text for kw in medium_keywords) or length > 200:
-        return 300  # 5 minutes for medium tasks
-    else:
-        return 180  # 3 minutes minimum for all tasks
+    """Always return 600s — dynamic detection was unreliable, flat max is safer."""
+    return 600
 
 
 def call_claude(prompt: str, timeout: int = None) -> str:
