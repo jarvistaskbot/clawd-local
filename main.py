@@ -86,11 +86,14 @@ def split_message(text: str, max_len: int = 4096) -> list[str]:
 
 
 async def safe_reply(message, text: str):
-    """Send with MarkdownV2, fall back to plain text if parsing fails."""
+    """Send with Markdown, fall back to plain text if parsing fails."""
     try:
-        await message.reply_text(text, parse_mode="MarkdownV2")
+        await message.reply_text(text, parse_mode="Markdown")
     except Exception:
-        await message.reply_text(text)
+        # Strip markdown syntax and send plain
+        import re
+        plain = re.sub(r'[*_`\[\]()]', '', text)
+        await message.reply_text(plain)
 
 
 def _check_claude_cli() -> str:
