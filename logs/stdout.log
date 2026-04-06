@@ -1528,3 +1528,80 @@ task: <Task pending name='Task-7' coro=<QueueManager._worker() running at /Users
 2026-04-06 19:36:36,263 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
 2026-04-06 19:36:46,333 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
 2026-04-06 19:36:56,403 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:37:06,264 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:37:06,266 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2026-04-06 19:37:06,267 - apscheduler.scheduler - INFO - Scheduler has been shut down
+2026-04-06 19:37:06,278 - telegram.ext.Application - INFO - Application.stop() complete
+2026-04-06 19:37:06,327 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-8' coro=<run_watchdog() running at /Users/openclaw/clawd-local/watchdog.py:61> wait_for=<Future pending cb=[<TaskWakeupMethWrapper object at 0x10a14abb0>()]>>
+2026-04-06 19:37:06,348 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-7' coro=<QueueManager._worker() running at /Users/openclaw/clawd-local/queue_manager.py:47> wait_for=<Future pending cb=[<TaskWakeupMethWrapper object at 0x10a1818b0>()]>>
+2026-04-06 19:37:07,515 - __main__ - INFO - Bot started. Polling for messages...
+2026-04-06 19:37:07,790 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getMe "HTTP/1.1 200 OK"
+2026-04-06 19:37:07,792 - queue_manager - INFO - Queue manager started (size=10, concurrency=1)
+2026-04-06 19:37:07,792 - __main__ - INFO - Queue manager and watchdog started.
+2026-04-06 19:37:07,859 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/deleteWebhook "HTTP/1.1 200 OK"
+2026-04-06 19:37:07,862 - apscheduler.scheduler - INFO - Scheduler started
+2026-04-06 19:37:07,862 - telegram.ext.Application - INFO - Application started
+2026-04-06 19:37:18,208 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:37:28,345 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:37:38,413 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:37:41,685 - __main__ - INFO - Bot started. Polling for messages...
+2026-04-06 19:37:41,958 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getMe "HTTP/1.1 200 OK"
+2026-04-06 19:37:41,961 - queue_manager - INFO - Queue manager started (size=10, concurrency=1)
+2026-04-06 19:37:41,961 - __main__ - INFO - Queue manager and watchdog started.
+2026-04-06 19:37:42,029 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/deleteWebhook "HTTP/1.1 200 OK"
+2026-04-06 19:37:42,032 - apscheduler.scheduler - INFO - Scheduler started
+2026-04-06 19:37:42,032 - telegram.ext.Application - INFO - Application started
+2026-04-06 19:37:45,308 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 409 Conflict"
+2026-04-06 19:37:45,310 - telegram.ext.Updater - ERROR - Error while calling `get_updates` one more time to mark all fetched updates as read: %s. Suppressing error to ensure graceful shutdown. When polling for updates is restarted, updates may be fetched again. Please adjust timeouts via `ApplicationBuilder` or the parameter `get_updates_request` of `Bot`.
+Traceback (most recent call last):
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/ext/_updater.py", line 400, in _get_updates_cleanup
+    await self.bot.get_updates(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/ext/_extbot.py", line 676, in get_updates
+    updates = await super().get_updates(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/_bot.py", line 4780, in get_updates
+    await self._post(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/_bot.py", line 703, in _post
+    return await self._do_post(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/ext/_extbot.py", line 372, in _do_post
+    return await super()._do_post(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/_bot.py", line 732, in _do_post
+    result = await request.post(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/request/_baserequest.py", line 198, in post
+    result = await self._request_wrapper(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/request/_baserequest.py", line 375, in _request_wrapper
+    raise exception
+telegram.error.Conflict: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running
+2026-04-06 19:37:45,322 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2026-04-06 19:37:45,323 - apscheduler.scheduler - INFO - Scheduler has been shut down
+2026-04-06 19:37:45,335 - telegram.ext.Application - INFO - Application.stop() complete
+2026-04-06 19:37:45,370 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-8' coro=<run_watchdog() running at /Users/openclaw/clawd-local/watchdog.py:61> wait_for=<Future pending cb=[<TaskWakeupMethWrapper object at 0x108b2ca00>()]>>
+2026-04-06 19:37:45,388 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-7' coro=<QueueManager._worker() running at /Users/openclaw/clawd-local/queue_manager.py:47> wait_for=<Future pending cb=[<TaskWakeupMethWrapper object at 0x108982e20>()]>>
+2026-04-06 19:37:52,307 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:38:02,386 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:38:12,455 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:38:22,528 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:38:32,598 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:38:42,672 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:38:52,744 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:39:02,815 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:39:12,897 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:39:22,976 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:39:33,070 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:39:43,143 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:39:53,242 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:40:03,312 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:40:13,415 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:40:23,484 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:40:33,555 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:40:43,626 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:40:53,697 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:41:03,796 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:41:13,871 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:41:23,944 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:41:34,017 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:41:44,088 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:41:54,162 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"

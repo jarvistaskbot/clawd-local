@@ -41,7 +41,34 @@ def format_prompt(history: list[dict], current_message: str) -> str:
     return "\n".join(parts)
 
 
-def call_claude(prompt: str) -> str:
+def estimate_timeout(prompt: str) -> int:
+    """Dynamically estimate timeout based on task complexity."""
+    text = prompt.lower()
+    length = len(prompt)
+
+    # Heavy tasks — code generation, analysis, long docs
+    heavy_keywords = [
+        "build", "create", "implement", "develop", "write a", "generate",
+        "refactor", "rewrite", "analyze", "audit", "review", "explain in detail",
+        "step by step", "full", "complete", "entire", "architecture",
+        "script", "function", "class", "module", "algorithm"
+    ]
+    # Medium tasks — summaries, explanations, edits
+    medium_keywords = [
+        "summarize", "explain", "describe", "compare", "list", "what is",
+        "how does", "translate", "fix", "debug", "improve", "edit"
+    ]
+
+    if any(kw in text for kw in heavy_keywords) or length > 2000:
+        return 480  # 8 minutes for heavy tasks
+    elif any(kw in text for kw in medium_keywords) or length > 500:
+        return 180  # 3 minutes for medium tasks
+    else:
+        return 60   # 1 minute for simple questions
+
+
+def call_claude(prompt: str, timeout: int = None) -> str:
+    dynamic_timeout = timeout or estimate_timeout(prompt)
     cmd = [
         CLAUDE_CLI_PATH,
         "--print",
@@ -54,7 +81,7 @@ def call_claude(prompt: str) -> str:
             cmd,
             capture_output=True,
             text=True,
-            timeout=CLAUDE_TIMEOUT,
+            timeout=dynamic_timeout,
             cwd=WORKSPACE_DIR,
         )
         if result.returncode != 0:
@@ -64,7 +91,7 @@ def call_claude(prompt: str) -> str:
             return f"Claude CLI exited with code {result.returncode}"
         return result.stdout.strip()
     except subprocess.TimeoutExpired:
-        return f"Claude CLI timed out after {CLAUDE_TIMEOUT} seconds. Try a simpler prompt."
+        return f"Claude CLI timed out after {dynamic_timeout}s. Try breaking the task into smaller steps."
     except FileNotFoundError:
         return f"Claude CLI not found at '{CLAUDE_CLI_PATH}'. Make sure it's installed and in your PATH."
     except Exception as e:
@@ -99,7 +126,8 @@ async def handle_message(user_id: int, message: str, skip_optimize: bool = False
 
     prompt = format_prompt(history, optimized)
     loop = asyncio.get_event_loop()
-    response = await loop.run_in_executor(None, call_claude, prompt)
+    dynamic_timeout = estimate_timeout(optimized)
+    response = await loop.run_in_executor(None, call_claude, prompt, dynamic_timeout)
 
     add_message(session_id, "user", message)
     add_message(session_id, "assistant", response)
