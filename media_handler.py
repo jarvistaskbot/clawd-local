@@ -58,9 +58,23 @@ async def download_telegram_file(bot, file_id: str, suffix: str = "") -> str:
 
 
 async def process_image(local_path: str, caption: str = "") -> str:
-    """Build a prompt asking Claude to analyze the image at the given path."""
-    caption_part = f"\nCaption from user: {caption}" if caption else ""
-    return f"Please analyze the image at this path: {local_path}{caption_part}"
+    """Build a prompt with base64-encoded image for Claude to analyze."""
+    import base64
+    import mimetypes
+    try:
+        mime_type = mimetypes.guess_type(local_path)[0] or "image/jpeg"
+        with open(local_path, "rb") as f:
+            b64_data = base64.b64encode(f.read()).decode("utf-8")
+        caption_part = f"\nUser caption: {caption}" if caption else ""
+        return (
+            f"[Image attached as base64 {mime_type}]\n"
+            f"data:{mime_type};base64,{b64_data}\n"
+            f"Please analyze this image and describe what you see.{caption_part}"
+        )
+    except Exception as e:
+        logger.error("Failed to encode image: %s", e)
+        caption_part = f"\nCaption: {caption}" if caption else ""
+        return f"User sent an image (could not encode: {e}).{caption_part}"
 
 
 async def transcribe_audio(local_path: str) -> str:
