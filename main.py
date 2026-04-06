@@ -20,6 +20,29 @@ from agent import handle_message
 async def handle_message_direct(user_id: int, message: str) -> str:
     """Handle message skipping OpenAI optimization — used for media (images, voice, video)."""
     return await handle_message(user_id, message, skip_optimize=True)
+
+
+async def run_with_typing(bot, chat_id: int, coro):
+    """Run a coroutine while keeping the Telegram typing indicator alive every 4s."""
+    stop_typing = asyncio.Event()
+
+    async def keep_typing():
+        while not stop_typing.is_set():
+            try:
+                await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(asyncio.shield(stop_typing.wait()), timeout=4.0)
+            except asyncio.TimeoutError:
+                pass
+
+    typing_task = asyncio.create_task(keep_typing())
+    try:
+        return await coro
+    finally:
+        stop_typing.set()
+        typing_task.cancel()
 from context import get_context, MEMORY_DIR, CONTEXT_FILES
 from queue_manager import queue_manager, QueueFullError
 from watchdog import run_watchdog, check_claude_health, is_healthy, setup_log_rotation
@@ -223,13 +246,31 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         return
     try:
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
-
         pending = queue_manager.pending_count
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await queue_manager.enqueue_prompt(user_id, text, handle_message)
+        # Keep sending typing indicator every 4s while Claude processes
+        stop_typing = asyncio.Event()
+        async def keep_typing():
+            while not stop_typing.is_set():
+                try:
+                    await context.bot.send_chat_action(
+                        chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+                except Exception:
+                    pass
+                try:
+                    await asyncio.wait_for(asyncio.shield(stop_typing.wait()), timeout=4.0)
+                except asyncio.TimeoutError:
+                    pass
+        typing_task = asyncio.create_task(keep_typing())
+
+        try:
+            response = await queue_manager.enqueue_prompt(user_id, text, handle_message)
+        finally:
+            stop_typing.set()
+            typing_task.cancel()
+
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
             await update.message.reply_text(chunk)
@@ -247,7 +288,6 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     local_path = None
     try:
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
         photo = update.message.photo[-1]  # highest resolution
         local_path = await download_telegram_file(context.bot, photo.file_id, suffix=".jpg")
         caption = update.message.caption or ""
@@ -257,7 +297,10 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct)
+        response = await run_with_typing(
+            context.bot, update.effective_chat.id,
+            queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct)
+        )
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
             await update.message.reply_text(chunk)
@@ -278,7 +321,7 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     local_path = None
     try:
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+        
         voice = update.message.voice or update.message.audio
         local_path = await download_telegram_file(context.bot, voice.file_id, suffix=".ogg")
         transcription = await transcribe_audio(local_path)
@@ -288,7 +331,7 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await queue_manager.enqueue_prompt(user_id, transcription, handle_message_direct)
+        response = await run_with_typing(context.bot, update.effective_chat.id, queue_manager.enqueue_prompt(user_id, transcription, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
             await update.message.reply_text(chunk)
@@ -310,7 +353,7 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     local_path = None
     frame_path = None
     try:
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+        
         video = update.message.video or update.message.video_note
         local_path = await download_telegram_file(context.bot, video.file_id, suffix=".mp4")
         frame_path = await extract_video_frame(local_path)
@@ -329,7 +372,7 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct)
+        response = await run_with_typing(context.bot, update.effective_chat.id, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
             await update.message.reply_text(chunk)
@@ -352,7 +395,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     local_path = None
     try:
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+        
         doc = update.message.document
         filename = doc.file_name or "unknown"
 
@@ -371,7 +414,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct)
+        response = await run_with_typing(context.bot, update.effective_chat.id, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
             await update.message.reply_text(chunk)

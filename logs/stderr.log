@@ -1983,3 +1983,228 @@ RuntimeError: Event loop is closed
 2026-04-06 19:32:11,110 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
 2026-04-06 19:32:21,246 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
 2026-04-06 19:32:31,383 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:32:34,749 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:32:34,751 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2026-04-06 19:32:34,752 - apscheduler.scheduler - INFO - Scheduler has been shut down
+2026-04-06 19:32:34,764 - telegram.ext.Application - INFO - Application.stop() complete
+2026-04-06 19:32:34,815 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-8' coro=<run_watchdog() running at /Users/openclaw/clawd-local/watchdog.py:61> wait_for=<Future pending cb=[<TaskWakeupMethWrapper object at 0x108fa2dc0>()]>>
+2026-04-06 19:32:34,815 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-8' coro=<run_watchdog() running at /Users/openclaw/clawd-local/watchdog.py:61> wait_for=<Future pending cb=[<TaskWakeupMethWrapper object at 0x108fa2dc0>()]>>
+2026-04-06 19:32:34,842 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-7' coro=<QueueManager._worker() running at /Users/openclaw/clawd-local/queue_manager.py:47> wait_for=<Future pending cb=[<TaskWakeupMethWrapper object at 0x108f1dee0>()]>>
+2026-04-06 19:32:34,842 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-7' coro=<QueueManager._worker() running at /Users/openclaw/clawd-local/queue_manager.py:47> wait_for=<Future pending cb=[<TaskWakeupMethWrapper object at 0x108f1dee0>()]>>
+Exception ignored in: <coroutine object QueueManager._worker at 0x1087655c0>
+Traceback (most recent call last):
+  File "/Users/openclaw/clawd-local/queue_manager.py", line 47, in _worker
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/queues.py", line 168, in get
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/base_events.py", line 746, in call_soon
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/base_events.py", line 510, in _check_closed
+RuntimeError: Event loop is closed
+2026-04-06 19:32:36,012 - __main__ - INFO - Bot started. Polling for messages...
+2026-04-06 19:32:36,277 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getMe "HTTP/1.1 200 OK"
+2026-04-06 19:32:36,279 - queue_manager - INFO - Queue manager started (size=10, concurrency=1)
+2026-04-06 19:32:36,280 - __main__ - INFO - Queue manager and watchdog started.
+2026-04-06 19:32:36,347 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/deleteWebhook "HTTP/1.1 200 OK"
+2026-04-06 19:32:36,349 - apscheduler.scheduler - INFO - Scheduler started
+2026-04-06 19:32:36,349 - telegram.ext.Application - INFO - Application started
+2026-04-06 19:32:46,623 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:32:56,692 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:33:06,761 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:33:16,831 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:33:18,461 - __main__ - INFO - Bot started. Polling for messages...
+2026-04-06 19:33:18,727 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getMe "HTTP/1.1 200 OK"
+2026-04-06 19:33:18,729 - queue_manager - INFO - Queue manager started (size=10, concurrency=1)
+2026-04-06 19:33:18,729 - __main__ - INFO - Queue manager and watchdog started.
+2026-04-06 19:33:18,796 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/deleteWebhook "HTTP/1.1 200 OK"
+2026-04-06 19:33:18,799 - apscheduler.scheduler - INFO - Scheduler started
+2026-04-06 19:33:18,799 - telegram.ext.Application - INFO - Application started
+2026-04-06 19:33:22,129 - telegram.ext.Updater - ERROR - Error while calling `get_updates` one more time to mark all fetched updates as read: %s. Suppressing error to ensure graceful shutdown. When polling for updates is restarted, updates may be fetched again. Please adjust timeouts via `ApplicationBuilder` or the parameter `get_updates_request` of `Bot`.
+Traceback (most recent call last):
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_transports/default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_transports/default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_async/connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_async/connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_async/connection.py", line 103, in handle_async_request
+    return await self._connection.handle_async_request(request)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_async/http11.py", line 136, in handle_async_request
+    raise exc
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_async/http11.py", line 106, in handle_async_request
+    ) = await self._receive_response_headers(**kwargs)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_async/http11.py", line 177, in _receive_response_headers
+    event = await self._receive_event(timeout=timeout)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_async/http11.py", line 217, in _receive_event
+    data = await self._network_stream.read(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_backends/anyio.py", line 37, in read
+    return b""
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py", line 135, in __exit__
+    self.gen.throw(type, value, traceback)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ReadTimeout
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/request/_httpxrequest.py", line 279, in do_request
+    res = await self._client.request(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_transports/default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py", line 135, in __exit__
+    self.gen.throw(type, value, traceback)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_transports/default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ReadTimeout
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/ext/_updater.py", line 400, in _get_updates_cleanup
+    await self.bot.get_updates(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/ext/_extbot.py", line 676, in get_updates
+    updates = await super().get_updates(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/_bot.py", line 4780, in get_updates
+    await self._post(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/_bot.py", line 703, in _post
+    return await self._do_post(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/ext/_extbot.py", line 372, in _do_post
+    return await super()._do_post(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/_bot.py", line 732, in _do_post
+    result = await request.post(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/request/_baserequest.py", line 198, in post
+    result = await self._request_wrapper(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/request/_baserequest.py", line 305, in _request_wrapper
+    code, payload = await self.do_request(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/request/_httpxrequest.py", line 296, in do_request
+    raise TimedOut from err
+telegram.error.TimedOut: Timed out
+2026-04-06 19:33:22,129 - telegram.ext.Updater - ERROR - Error while calling `get_updates` one more time to mark all fetched updates as read: %s. Suppressing error to ensure graceful shutdown. When polling for updates is restarted, updates may be fetched again. Please adjust timeouts via `ApplicationBuilder` or the parameter `get_updates_request` of `Bot`.
+Traceback (most recent call last):
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_transports/default.py", line 101, in map_httpcore_exceptions
+    yield
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_transports/default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_async/connection_pool.py", line 256, in handle_async_request
+    raise exc from None
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_async/connection_pool.py", line 236, in handle_async_request
+    response = await connection.handle_async_request(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_async/connection.py", line 103, in handle_async_request
+    return await self._connection.handle_async_request(request)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_async/http11.py", line 136, in handle_async_request
+    raise exc
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_async/http11.py", line 106, in handle_async_request
+    ) = await self._receive_response_headers(**kwargs)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_async/http11.py", line 177, in _receive_response_headers
+    event = await self._receive_event(timeout=timeout)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_async/http11.py", line 217, in _receive_event
+    data = await self._network_stream.read(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_backends/anyio.py", line 37, in read
+    return b""
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py", line 135, in __exit__
+    self.gen.throw(type, value, traceback)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpcore/_exceptions.py", line 14, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore.ReadTimeout
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/request/_httpxrequest.py", line 279, in do_request
+    res = await self._client.request(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_client.py", line 1540, in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_client.py", line 1629, in send
+    response = await self._send_handling_auth(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_client.py", line 1657, in _send_handling_auth
+    response = await self._send_handling_redirects(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_client.py", line 1694, in _send_handling_redirects
+    response = await self._send_single_request(request)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_client.py", line 1730, in _send_single_request
+    response = await transport.handle_async_request(request)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_transports/default.py", line 394, in handle_async_request
+    resp = await self._pool.handle_async_request(req)
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/contextlib.py", line 135, in __exit__
+    self.gen.throw(type, value, traceback)
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/httpx/_transports/default.py", line 118, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx.ReadTimeout
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/ext/_updater.py", line 400, in _get_updates_cleanup
+    await self.bot.get_updates(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/ext/_extbot.py", line 676, in get_updates
+    updates = await super().get_updates(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/_bot.py", line 4780, in get_updates
+    await self._post(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/_bot.py", line 703, in _post
+    return await self._do_post(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/ext/_extbot.py", line 372, in _do_post
+    return await super()._do_post(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/_bot.py", line 732, in _do_post
+    result = await request.post(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/request/_baserequest.py", line 198, in post
+    result = await self._request_wrapper(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/request/_baserequest.py", line 305, in _request_wrapper
+    code, payload = await self.do_request(
+  File "/Users/openclaw/Library/Python/3.9/lib/python/site-packages/telegram/request/_httpxrequest.py", line 296, in do_request
+    raise TimedOut from err
+telegram.error.TimedOut: Timed out
+2026-04-06 19:33:22,171 - telegram.ext.Application - INFO - Application is stopping. This might take a moment.
+2026-04-06 19:33:22,172 - apscheduler.scheduler - INFO - Scheduler has been shut down
+2026-04-06 19:33:22,184 - telegram.ext.Application - INFO - Application.stop() complete
+2026-04-06 19:33:22,218 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-8' coro=<run_watchdog() running at /Users/openclaw/clawd-local/watchdog.py:61> wait_for=<Future pending cb=[<TaskWakeupMethWrapper object at 0x10c874d00>()]>>
+2026-04-06 19:33:22,218 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-8' coro=<run_watchdog() running at /Users/openclaw/clawd-local/watchdog.py:61> wait_for=<Future pending cb=[<TaskWakeupMethWrapper object at 0x10c874d00>()]>>
+2026-04-06 19:33:22,236 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-7' coro=<QueueManager._worker() running at /Users/openclaw/clawd-local/queue_manager.py:47> wait_for=<Future pending cb=[<TaskWakeupMethWrapper object at 0x10c6c7ee0>()]>>
+2026-04-06 19:33:22,236 - asyncio - ERROR - Task was destroyed but it is pending!
+task: <Task pending name='Task-7' coro=<QueueManager._worker() running at /Users/openclaw/clawd-local/queue_manager.py:47> wait_for=<Future pending cb=[<TaskWakeupMethWrapper object at 0x10c6c7ee0>()]>>
+Exception ignored in: <coroutine object QueueManager._worker at 0x10c810640>
+Traceback (most recent call last):
+  File "/Users/openclaw/clawd-local/queue_manager.py", line 47, in _worker
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/queues.py", line 168, in get
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/base_events.py", line 746, in call_soon
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/base_events.py", line 510, in _check_closed
+RuntimeError: Event loop is closed
+2026-04-06 19:33:29,072 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:33:39,143 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:33:44,702 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:33:44,987 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/sendChatAction "HTTP/1.1 200 OK"
+2026-04-06 19:33:54,842 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:34:04,978 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:34:15,047 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:34:25,118 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:34:35,188 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:34:45,260 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:34:55,359 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:35:05,433 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:35:15,503 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:35:25,574 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:35:35,645 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:35:45,334 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/sendMessage "HTTP/1.1 200 OK"
+2026-04-06 19:35:45,740 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:35:55,877 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:36:05,946 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:36:16,016 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:36:26,192 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:36:36,263 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:36:46,333 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
+2026-04-06 19:36:56,403 - httpx - INFO - HTTP Request: POST https://api.telegram.org/bot8474284341:AAF40RCVtCjypwq42ZZxWSX7I3RhOOdsiCM/getUpdates "HTTP/1.1 200 OK"
