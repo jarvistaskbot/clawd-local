@@ -13,6 +13,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS, CLAUDE_CLI_PATH, CLAUDE_MODEL
 from memory import init_db, get_or_create_session, get_history, reset_session, get_stats
 from agent import handle_message
+from context import get_context, MEMORY_DIR, CONTEXT_FILES
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -191,6 +192,30 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Something went wrong: {e}")
 
 
+async def context_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
+        return
+    from pathlib import Path
+    loaded = []
+    for f in CONTEXT_FILES:
+        if Path(f).exists():
+            loaded.append(f"✅ {Path(f).name}")
+        else:
+            loaded.append(f"❌ {Path(f).name} (missing)")
+    daily_files = sorted(MEMORY_DIR.glob("*.md"), reverse=True)[:7] if MEMORY_DIR.exists() else []
+    daily_str = f"{len(daily_files)} daily notes (last 7 days)" if daily_files else "no daily notes found"
+    ctx = get_context()
+    size_kb = len(ctx.encode()) / 1024
+    msg = (
+        "📚 Loaded context from OpenClaw workspace:\n\n"
+        + "\n".join(loaded)
+        + f"\n\n📅 Daily notes: {daily_str}"
+        + f"\n📦 Total context size: {size_kb:.1f} KB"
+        + "\n\nContext is injected into every Claude prompt automatically."
+    )
+    await update.message.reply_text(msg)
+
+
 def main():
     if not TELEGRAM_BOT_TOKEN:
         print("Error: TELEGRAM_BOT_TOKEN not set. Copy .env.example to .env and configure it.")
@@ -205,6 +230,7 @@ def main():
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("history", history_command))
     app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("context", context_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     logger.info("Bot started. Polling for messages...")
     app.run_polling()

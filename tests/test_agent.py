@@ -52,7 +52,7 @@ def test_format_prompt_with_history():
         {"role": "assistant", "content": "hello there"},
     ]
     result = format_prompt(history, "how are you?")
-    assert "[Previous conversation:]" in result
+    assert "[Previous conversation in this session:]" in result
     assert "Human: hi" in result
     assert "Assistant: hello there" in result
     assert "[Current message:]" in result

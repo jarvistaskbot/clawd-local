@@ -2,6 +2,7 @@ import subprocess
 
 from config import CLAUDE_CLI_PATH, CLAUDE_MODEL, CLAUDE_TIMEOUT, MAX_HISTORY_MESSAGES, WORKSPACE_DIR
 from memory import get_or_create_session, add_message, get_history
+from context import get_context
 
 MAX_PROMPT_LENGTH = 10000
 
@@ -18,8 +19,14 @@ def escape_backticks(text: str) -> str:
 
 def format_prompt(history: list[dict], current_message: str) -> str:
     parts = []
+
+    # Inject OpenClaw persistent context
+    system_context = get_context()
+    if system_context:
+        parts.append(system_context)
+
     if history:
-        parts.append("[Previous conversation:]")
+        parts.append("[Previous conversation in this session:]")
         for msg in history:
             label = "Human" if msg["role"] == "user" else "Assistant"
             parts.append(f"{label}: {escape_backticks(msg['content'])}")
