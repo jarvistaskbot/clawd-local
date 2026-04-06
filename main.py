@@ -16,6 +16,10 @@ from config import (
 )
 from memory import init_db, get_or_create_session, get_history, reset_session, get_stats
 from agent import handle_message
+
+async def handle_message_direct(user_id: int, message: str) -> str:
+    """Handle message skipping OpenAI optimization — used for media (images, voice, video)."""
+    return await handle_message(user_id, message, skip_optimize=True)
 from context import get_context, MEMORY_DIR, CONTEXT_FILES
 from queue_manager import queue_manager, QueueFullError
 from watchdog import run_watchdog, check_claude_health, is_healthy, setup_log_rotation
@@ -253,7 +257,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await queue_manager.enqueue_prompt(user_id, prompt, handle_message)
+        response = await queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct)
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
             await update.message.reply_text(chunk)
@@ -284,7 +288,7 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await queue_manager.enqueue_prompt(user_id, transcription, handle_message)
+        response = await queue_manager.enqueue_prompt(user_id, transcription, handle_message_direct)
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
             await update.message.reply_text(chunk)
@@ -325,7 +329,7 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await queue_manager.enqueue_prompt(user_id, prompt, handle_message)
+        response = await queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct)
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
             await update.message.reply_text(chunk)
@@ -367,7 +371,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await queue_manager.enqueue_prompt(user_id, prompt, handle_message)
+        response = await queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct)
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         for chunk in split_message(response):
             await update.message.reply_text(chunk)

@@ -71,7 +71,7 @@ def call_claude(prompt: str) -> str:
         return f"Unexpected error calling Claude CLI: {e}"
 
 
-async def handle_message(user_id: int, message: str) -> str:
+async def handle_message(user_id: int, message: str, skip_optimize: bool = False) -> str:
     message = sanitize_prompt(message)
     if not message.strip():
         return "Empty prompt. Please send a message with some content."
@@ -79,9 +79,11 @@ async def handle_message(user_id: int, message: str) -> str:
     session_id = get_or_create_session(user_id)
     history = get_history(session_id, limit=MAX_HISTORY_MESSAGES)
 
-    # Optimize prompt via OpenAI
-    optimized = await optimize_prompt(message)
-    was_optimized = OPENAI_ENABLED and optimized != message
+    # Optimize prompt via OpenAI (skip for media — send directly to Claude)
+    if skip_optimize:
+        optimized = message
+    else:
+        optimized = await optimize_prompt(message)
 
     prompt = format_prompt(history, optimized)
     loop = asyncio.get_event_loop()
@@ -89,8 +91,4 @@ async def handle_message(user_id: int, message: str) -> str:
 
     add_message(session_id, "user", message)
     add_message(session_id, "assistant", response)
-
-    if was_optimized:
-        pass  # optimization is silent
-
     return response
