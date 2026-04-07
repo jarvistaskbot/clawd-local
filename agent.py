@@ -41,9 +41,9 @@ def format_prompt(history: list[dict], current_message: str) -> str:
     return "\n".join(parts)
 
 
-def estimate_timeout(prompt: str) -> int:
-    """Always return 600s — dynamic detection was unreliable, flat max is safer."""
-    return 600
+def estimate_timeout(prompt: str) -> int | None:
+    """Return None = no timeout. Claude runs until it finishes, no matter how long."""
+    return None
 
 
 def call_claude(prompt: str, timeout: int = None) -> str:
