@@ -62,6 +62,7 @@ def call_claude(prompt: str, timeout: int = None) -> str:
             text=True,
             timeout=dynamic_timeout,
             cwd=WORKSPACE_DIR,
+            start_new_session=True,  # Isolate from parent process group — prevents SIGTERM kill
         )
         if result.returncode != 0:
             stderr = result.stderr.strip()
