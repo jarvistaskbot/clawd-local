@@ -100,6 +100,7 @@ async def handle_message(user_id: int, message: str, skip_optimize: bool = False
     if skip_optimize:
         optimized = message
     elif wants_optimization:
+        # Generate optimized prompt and EXECUTE it through Claude directly
         optimized = await optimize_prompt(message)
     else:
         optimized = message
