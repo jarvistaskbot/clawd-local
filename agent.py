@@ -41,7 +41,7 @@ def format_prompt(history: list[dict], current_message: str) -> str:
     return "\n".join(parts)
 
 
-def estimate_timeout(prompt: str) -> int | None:
+def estimate_timeout(prompt: str):
     """Return None = no timeout. Claude runs until it finishes, no matter how long."""
     return None
 
