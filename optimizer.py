@@ -12,9 +12,10 @@ from config import OPENAI_API_KEY, OPENAI_MODEL, OPENAI_ENABLED, MAX_OPTIMIZED_P
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
-    "You are a prompt optimizer. Rewrite the user's message to be clearer, "
-    "more specific, and better structured for an AI assistant. Preserve the "
-    "original intent. Return only the optimized prompt, no explanation."
+    "You are a prompt optimizer. Rewrite the user's request as a direct, clear, "
+    "actionable instruction for an AI assistant. Do NOT include phrases like "
+    "'Here is an optimized prompt:' or 'Prompt:' — just return the instruction itself, "
+    "ready to be executed. Preserve the original intent. Return only the instruction text."
 )
 
 

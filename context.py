@@ -25,8 +25,8 @@ def _read_file(path: Path) -> str:
         return ""
 
 
-def _load_recent_daily_notes(days: int = 7) -> str:
-    """Load the most recent N daily memory files."""
+def _load_recent_daily_notes(days: int = 3) -> str:
+    """Load the most recent N daily memory files (capped at 3 to keep context small)."""
     if not MEMORY_DIR.exists():
         return ""
     files = sorted(MEMORY_DIR.glob("*.md"), reverse=True)[:days]
@@ -34,6 +34,9 @@ def _load_recent_daily_notes(days: int = 7) -> str:
     for f in reversed(files):
         content = _read_file(f)
         if content:
+            # Cap each daily note at 3000 chars
+            if len(content) > 3000:
+                content = content[:3000] + "\n... (truncated)"
             parts.append(f"### {f.stem}\n{content}")
     return "\n\n".join(parts)
 
@@ -42,10 +45,13 @@ def build_system_context() -> str:
     """Build the full system context string to prepend to every Claude prompt."""
     sections = []
 
-    # Core identity and user profile
+    # Core identity and user profile (cap MEMORY.md to avoid huge context)
     for path in CONTEXT_FILES:
         content = _read_file(path)
         if content:
+            max_len = 8000 if path.name == 'MEMORY.md' else 2000
+            if len(content) > max_len:
+                content = content[:max_len] + "\n... (truncated)"
             sections.append(f"## {path.name}\n{content}")
 
     # Recent daily notes
