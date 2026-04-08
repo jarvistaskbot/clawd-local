@@ -81,6 +81,16 @@ def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dic
         )
         if result.returncode != 0:
             stderr = result.stderr.strip()
+            stdout_err = result.stdout.strip()
+            combined = (stderr + " " + stdout_err).lower()
+            # Detect auth failure specifically
+            if "401" in combined or "authentication" in combined or "invalid authentication" in combined or "credentials" in combined:
+                logger.error("[Claude] Auth failure detected (code %s) — notify user", result.returncode)
+                return {"response": (
+                    "🔐 *Claude authentication expired.*\n\n"
+                    "Run this on Mac Mini terminal:\n`claude logout && claude login`\n\n"
+                    "Then send any message here to resume."
+                ), "session_id": None, "auth_error": True}
             if stderr:
                 return {"response": f"Error from Claude CLI:\n{stderr}", "session_id": None}
             return {"response": f"Claude CLI exited with code {result.returncode}", "session_id": None}
