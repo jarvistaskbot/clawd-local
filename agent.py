@@ -1,6 +1,9 @@
 import asyncio
 import json
+import logging
 import subprocess
+
+logger = logging.getLogger(__name__)
 
 from config import (
     CLAUDE_CLI_PATH, CLAUDE_MODEL, CLAUDE_TIMEOUT,
@@ -8,7 +11,7 @@ from config import (
 )
 from memory import (
     get_or_create_session, add_message, get_history,
-    get_active_project, get_or_create_project_session,
+    get_active_project, set_active_project, get_or_create_project_session,
     get_or_create_project_chat_session, get_project_claude_session_id,
     update_project_claude_session,
 )
@@ -113,8 +116,13 @@ async def handle_message(user_id: int, message: str, skip_optimize: bool = False
     if not message.strip():
         return "Empty prompt. Please send a message with some content."
 
-    # Get active project and project-specific chat session
+    # Auto-detect project from message keywords, then get session
     project_name = get_active_project(user_id)
+    detected = detect_project(message, project_name)
+    if detected != project_name:
+        set_active_project(user_id, detected)
+        project_name = detected
+        logger.info("[Agent] Auto-switched to project: %s", project_name)
     get_or_create_project_session(user_id, project_name)
     session_id = get_or_create_project_chat_session(user_id, project_name)
     history = get_history(session_id, limit=MAX_HISTORY_MESSAGES)
@@ -153,3 +161,36 @@ async def handle_message(user_id: int, message: str, skip_optimize: bool = False
     add_message(session_id, "user", message)
     add_message(session_id, "assistant", response)
     return response
+
+# Project auto-detection keywords
+PROJECT_KEYWORDS = {
+    "arbitrage": [
+        "arbitrage", "trading", "bot", "bybit", "funding", "basis", "position",
+        "profit", "pnl", "trade", "entry", "exit", "hedge", "spot", "perp",
+        "futures", "delivery", "borrow", "fee", "slippage", "vps", "docker",
+        "mongo", "scanner", "breakeven", "mnt", "xaut", "doge", "xrp"
+    ],
+    "tls": [
+        "tls", "visa", "appointment", "slot", "booking", "extension", "chrome",
+        "germany", "italy", "cyprus", "tlscontact", "cloudflare", "cf", "rsc",
+        "safari", "polling", "country", "vac", "keycloak", "session"
+    ],
+}
+
+def detect_project(message: str, current_project: str) -> str:
+    """Detect which project a message belongs to based on keywords.
+    Returns the detected project name, or current_project if no match.
+    """
+    msg_lower = message.lower()
+    scores = {}
+    for project, keywords in PROJECT_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in msg_lower)
+        if score > 0:
+            scores[project] = score
+    if not scores:
+        return current_project
+    best = max(scores, key=scores.get)
+    # Only switch if score >= 2 (at least 2 keyword matches) to avoid false positives
+    if scores[best] >= 2:
+        return best
+    return current_project
