@@ -15,7 +15,12 @@ from config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS, TELEGRAM_CHAT_ID,
     CLAUDE_CLI_PATH, CLAUDE_MODEL, OPENAI_ENABLED, OPENAI_MODEL,
 )
-from memory import init_db, get_or_create_session, get_history, reset_session, get_stats, clear_last_messages
+from memory import (
+    init_db, get_or_create_session, get_history, reset_session, get_stats, clear_last_messages,
+    get_active_project, set_active_project, get_or_create_project_session,
+    get_or_create_project_chat_session, list_project_sessions, delete_project_session,
+    reset_project_session, get_project_claude_session_id,
+)
 from agent import handle_message
 
 async def handle_message_direct(user_id: int, message: str) -> str:
@@ -113,7 +118,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
     user_id = update.effective_user.id
-    session_id = get_or_create_session(user_id)
+    project_name = get_active_project(user_id)
+    session_id = get_or_create_project_chat_session(user_id, project_name)
     history = get_history(session_id)
     cli_status = _check_claude_cli()
     last = _last_activity or "no activity yet"
@@ -121,10 +127,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "clawd-local status\n\n"
         f"Bot running: OK\n"
         f"Claude CLI: {cli_status}\n"
+        f"Project: {project_name}\n"
         f"Memory: {len(history)} messages in current session\n"
         f"Last activity: {last}\n\n"
         "Commands:\n"
         "/start - Bot status\n"
+        "/session <name> - Switch project\n"
+        "/sessions - List projects\n"
         "/models - List available models\n"
         "/reset - Start a fresh conversation\n"
         "/history - Show recent messages\n"
@@ -142,6 +151,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Available commands:\n\n"
         "/start - Bot status and diagnostics\n"
+        "/session <name> - Switch to project session\n"
+        "/sessions - List all project sessions\n"
+        "/session delete <name> - Delete a project session\n"
         "/models - List available Claude models\n"
         "/new - Start new session (history preserved)\n"
         "/reset - Start a fresh conversation\n"
@@ -192,17 +204,19 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
     user_id = update.effective_user.id
-    reset_session(user_id)
-    await update.message.reply_text("Conversation reset. Starting fresh!")
+    project_name = get_active_project(user_id)
+    reset_project_session(user_id, project_name)
+    await update.message.reply_text(f"Conversation reset for project '{project_name}'. Starting fresh!")
 
 
 async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
     user_id = update.effective_user.id
-    reset_session(user_id)
+    project_name = get_active_project(user_id)
+    reset_project_session(user_id, project_name)
     await update.message.reply_text(
-        "🆕 New session started. Previous history preserved but not active in this session."
+        f"🆕 New session started for project '{project_name}'. Previous history preserved but not active."
     )
 
 
@@ -217,21 +231,23 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             await update.message.reply_text("Usage: /clear [N] — N must be a number.")
             return
-    session_id = get_or_create_session(user_id)
+    project_name = get_active_project(user_id)
+    session_id = get_or_create_project_chat_session(user_id, project_name)
     deleted = clear_last_messages(session_id, count)
-    await update.message.reply_text(f"🗑 Cleared last {deleted} messages from context.")
+    await update.message.reply_text(f"🗑 Cleared last {deleted} messages from project '{project_name}'.")
 
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
     user_id = update.effective_user.id
-    session_id = get_or_create_session(user_id)
+    project_name = get_active_project(user_id)
+    session_id = get_or_create_project_chat_session(user_id, project_name)
     messages = get_history(session_id, limit=10)
     if not messages:
-        await update.message.reply_text("No messages in this session yet.")
+        await update.message.reply_text(f"No messages in project '{project_name}' yet.")
         return
-    lines = []
+    lines = [f"📁 Project: {project_name}\n"]
     for msg in messages:
         prefix = "You" if msg["role"] == "user" else "Claude"
         content = msg["content"][:200]
@@ -245,10 +261,17 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
     user_id = update.effective_user.id
+    project_name = get_active_project(user_id)
+    session_id = get_or_create_project_chat_session(user_id, project_name)
+    messages = get_history(session_id, limit=9999)
+    claude_sid = get_project_claude_session_id(user_id, project_name)
     s = get_stats(user_id)
     await update.message.reply_text(
-        f"Sessions: {s['session_count']}\n"
-        f"Total messages: {s['total_messages']}"
+        f"📁 Project: {project_name}\n"
+        f"Messages in project: {len(messages)}\n"
+        f"Claude session: {'active' if claude_sid else 'none'}\n\n"
+        f"All projects — Sessions: {s['session_count']}\n"
+        f"All projects — Total messages: {s['total_messages']}"
     )
 
 
@@ -506,6 +529,83 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cleanup_temp_file(local_path)
 
 
+async def session_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /session <name>, /session new <name>, /session delete <name>."""
+    if not is_allowed(update.effective_user.id):
+        return
+    user_id = update.effective_user.id
+    args = context.args or []
+
+    if not args:
+        # Show current project
+        project_name = get_active_project(user_id)
+        session_id = get_or_create_project_chat_session(user_id, project_name)
+        messages = get_history(session_id, limit=9999)
+        claude_sid = get_project_claude_session_id(user_id, project_name)
+        await update.message.reply_text(
+            f"📁 Active project: {project_name}\n"
+            f"💬 {len(messages)} messages\n"
+            f"🤖 Claude session: {'active' if claude_sid else 'none'}\n\n"
+            "Usage:\n"
+            "/session <name> — switch to project\n"
+            "/session delete <name> — delete project\n"
+            "/sessions — list all projects"
+        )
+        return
+
+    if args[0].lower() == "delete":
+        if len(args) < 2:
+            await update.message.reply_text("Usage: /session delete <name>")
+            return
+        target = args[1].lower()
+        active = get_active_project(user_id)
+        if target == active:
+            await update.message.reply_text("Cannot delete the active project. Switch to another first.")
+            return
+        if delete_project_session(user_id, target):
+            await update.message.reply_text(f"🗑 Deleted project: {target}")
+        else:
+            await update.message.reply_text(f"Project '{target}' not found.")
+        return
+
+    # Switch to (or create) project
+    project_name = args[0].lower()
+    set_active_project(user_id, project_name)
+    ps = get_or_create_project_session(user_id, project_name)
+    session_id = get_or_create_project_chat_session(user_id, project_name)
+    messages = get_history(session_id, limit=9999)
+    claude_sid = ps.get("claude_session_id")
+    await update.message.reply_text(
+        f"📁 Switched to project: {project_name}\n"
+        f"💬 {len(messages)} messages in this session\n"
+        f"🤖 Claude session: {'active' if claude_sid else 'new'}"
+    )
+
+
+async def sessions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all project sessions."""
+    if not is_allowed(update.effective_user.id):
+        return
+    user_id = update.effective_user.id
+    sessions = list_project_sessions(user_id)
+    if not sessions:
+        project_name = get_active_project(user_id)
+        await update.message.reply_text(
+            f"📁 Active project: {project_name} (no other sessions)\n\n"
+            "Use /session <name> to create a new project."
+        )
+        return
+
+    lines = ["📁 Your project sessions:\n"]
+    for s in sessions:
+        marker = " (active)" if s["is_active"] else ""
+        claude = "🤖" if s["has_claude_session"] else ""
+        last = s["last_used_at"][:16] if s["last_used_at"] else "never"
+        lines.append(f"• {s['name']}{marker} — {s['message_count']} msgs, last: {last} {claude}")
+    lines.append("\nUse /session <name> to switch.")
+    await update.message.reply_text("\n".join(lines))
+
+
 async def context_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
@@ -565,6 +665,8 @@ def main():
     app.add_handler(CommandHandler("history", history_command))
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("status", status_command))
+    app.add_handler(CommandHandler("session", session_command))
+    app.add_handler(CommandHandler("sessions", sessions_command))
     app.add_handler(CommandHandler("context", context_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))

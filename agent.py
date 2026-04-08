@@ -1,11 +1,17 @@
 import asyncio
+import json
 import subprocess
 
 from config import (
     CLAUDE_CLI_PATH, CLAUDE_MODEL, CLAUDE_TIMEOUT,
     MAX_HISTORY_MESSAGES, WORKSPACE_DIR, OPENAI_ENABLED,
 )
-from memory import get_or_create_session, add_message, get_history
+from memory import (
+    get_or_create_session, add_message, get_history,
+    get_active_project, get_or_create_project_session,
+    get_or_create_project_chat_session, get_project_claude_session_id,
+    update_project_claude_session,
+)
 from context import get_context
 from optimizer import optimize_prompt
 
@@ -46,15 +52,21 @@ def estimate_timeout(prompt: str):
     return None
 
 
-def call_claude(prompt: str, timeout: int = None) -> str:
+def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dict:
+    """Call Claude CLI. Returns dict: {response: str, session_id: str | None}.
+    Uses --resume if claude_session_id is provided for session continuity.
+    """
     dynamic_timeout = timeout or estimate_timeout(prompt)
     cmd = [
         CLAUDE_CLI_PATH,
         "--print",
         "--model", CLAUDE_MODEL,
         "--permission-mode", "bypassPermissions",
-        prompt,
+        "--output-format", "json",
     ]
+    if claude_session_id:
+        cmd.extend(["--resume", claude_session_id])
+    cmd.append(prompt)
     try:
         result = subprocess.run(
             cmd,
@@ -62,20 +74,38 @@ def call_claude(prompt: str, timeout: int = None) -> str:
             text=True,
             timeout=dynamic_timeout,
             cwd=WORKSPACE_DIR,
-            start_new_session=True,  # Isolate from parent process group — prevents SIGTERM kill
+            start_new_session=True,
         )
         if result.returncode != 0:
             stderr = result.stderr.strip()
             if stderr:
-                return f"Error from Claude CLI:\n{stderr}"
-            return f"Claude CLI exited with code {result.returncode}"
-        return result.stdout.strip()
+                return {"response": f"Error from Claude CLI:\n{stderr}", "session_id": None}
+            return {"response": f"Claude CLI exited with code {result.returncode}", "session_id": None}
+
+        # Parse JSON output to extract response and session ID
+        stdout = result.stdout.strip()
+        try:
+            data = json.loads(stdout)
+            response_text = data.get("result", "") or data.get("content", "") or ""
+            # Handle content blocks format
+            if not response_text and isinstance(data.get("content"), list):
+                parts = []
+                for block in data["content"]:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        parts.append(block.get("text", ""))
+                response_text = "\n".join(parts)
+            new_session_id = data.get("session_id") or data.get("sessionId")
+            return {"response": response_text.strip(), "session_id": new_session_id}
+        except (json.JSONDecodeError, TypeError):
+            # Fallback: treat as plain text
+            return {"response": stdout, "session_id": None}
+
     except subprocess.TimeoutExpired:
-        return f"Claude CLI timed out after {dynamic_timeout}s. Try breaking the task into smaller steps."
+        return {"response": f"Claude CLI timed out after {dynamic_timeout}s. Try breaking the task into smaller steps.", "session_id": None}
     except FileNotFoundError:
-        return f"Claude CLI not found at '{CLAUDE_CLI_PATH}'. Make sure it's installed and in your PATH."
+        return {"response": f"Claude CLI not found at '{CLAUDE_CLI_PATH}'. Make sure it's installed and in your PATH.", "session_id": None}
     except Exception as e:
-        return f"Unexpected error calling Claude CLI: {e}"
+        return {"response": f"Unexpected error calling Claude CLI: {e}", "session_id": None}
 
 
 async def handle_message(user_id: int, message: str, skip_optimize: bool = False) -> str:
@@ -83,12 +113,16 @@ async def handle_message(user_id: int, message: str, skip_optimize: bool = False
     if not message.strip():
         return "Empty prompt. Please send a message with some content."
 
-    session_id = get_or_create_session(user_id)
+    # Get active project and project-specific chat session
+    project_name = get_active_project(user_id)
+    get_or_create_project_session(user_id, project_name)
+    session_id = get_or_create_project_chat_session(user_id, project_name)
     history = get_history(session_id, limit=MAX_HISTORY_MESSAGES)
 
+    # Get saved Claude CLI session ID for resume
+    claude_session_id = get_project_claude_session_id(user_id, project_name)
+
     # Optimize prompt via OpenAI only when user explicitly asks for it
-    # Triggers: message contains "create a prompt", "create prompt", or starts with "prompt:"
-    # All other messages go directly to Claude as-is to preserve natural conversation flow
     msg_lower = message.lower()
     wants_optimization = (
         "create a prompt" in msg_lower or
@@ -100,15 +134,21 @@ async def handle_message(user_id: int, message: str, skip_optimize: bool = False
     if skip_optimize:
         optimized = message
     elif wants_optimization:
-        # Generate optimized prompt and EXECUTE it through Claude directly
         optimized = await optimize_prompt(message)
     else:
         optimized = message
 
     prompt = format_prompt(history, optimized)
     loop = asyncio.get_event_loop()
-    dynamic_timeout = estimate_timeout(optimized)
-    response = await loop.run_in_executor(None, call_claude, prompt, dynamic_timeout)
+    result = await loop.run_in_executor(
+        None, call_claude, prompt, estimate_timeout(optimized), claude_session_id
+    )
+
+    response = result["response"]
+
+    # Save new Claude session ID if returned
+    if result.get("session_id"):
+        update_project_claude_session(user_id, project_name, result["session_id"])
 
     add_message(session_id, "user", message)
     add_message(session_id, "assistant", response)
