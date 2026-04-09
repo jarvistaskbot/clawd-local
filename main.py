@@ -388,9 +388,10 @@ async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args:
         await update.message.reply_text(
-            "Usage: /upload <file_path>\n"
-            "Example: /upload ~/clawd-local/history.db\n"
-            "Example: /upload /tmp/report.txt"
+            "Usage: /upload <file_path>\n\n"
+            "Place files in ~/clawd-local/ for easy access:\n"
+            "Example: /upload ~/clawd-local/report.txt\n"
+            "Example: /upload ~/clawd-local/myfile.zip"
         )
         return
 
