@@ -23,7 +23,7 @@ from memory import (
 )
 from agent import handle_message
 
-async def handle_message_direct(user_id: int, message: str) -> str:
+async def handle_message_direct(user_id: int, message: str) -> dict:
     """Handle message skipping OpenAI optimization — used for media (images, voice, video)."""
     return await handle_message(user_id, message, skip_optimize=True)
 
@@ -101,6 +101,36 @@ async def safe_reply(message, text: str):
         await message.reply_text(plain)
 
 
+def _unpack_result(result) -> tuple:
+    """Unpack agent result into (text, file_path). Handles both dict and str."""
+    if isinstance(result, dict):
+        return result.get("text", ""), result.get("file")
+    return result, None
+
+
+async def _send_file_if_requested(context, chat_id: int, file_to_send: str):
+    """Send a file via Telegram if the agent included a [SEND_FILE:] marker."""
+    if not file_to_send:
+        return
+    file_path = os.path.expanduser(file_to_send)
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "rb") as f:
+                await context.bot.send_document(
+                    chat_id=chat_id,
+                    document=f,
+                    filename=os.path.basename(file_path),
+                )
+        except Exception as e:
+            from telegram import Bot
+            await context.bot.send_message(chat_id=chat_id, text=f"Failed to send file: {e}")
+    else:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"Claude tried to send a file but it was not found: {file_path}",
+        )
+
+
 def _check_claude_cli() -> str:
     try:
         result = subprocess.run(
@@ -139,6 +169,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/history - Show recent messages\n"
         "/stats - Show session statistics\n"
         "/status - System health status\n"
+        "/upload <path> - Send a local file\n"
         "/stop - Shut down the bot\n"
         "/restart - Restart the bot\n"
         "/help - Show this help"
@@ -163,6 +194,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/status - System health status\n"
         "/stop - Shut down the bot\n"
         "/restart - Restart the bot\n"
+        "/upload <path> - Send a local file to Telegram\n"
         "/help - Show this help\n\n"
         "Send any text message to chat with Claude."
     )
@@ -348,6 +380,44 @@ async def _run_with_progress(update, context, coro):
     return result
 
 
+async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send a local file to Telegram. Usage: /upload /path/to/file"""
+    if not is_allowed(update.effective_user.id):
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Usage: /upload <file_path>\n"
+            "Example: /upload ~/clawd-local/history.db\n"
+            "Example: /upload /tmp/report.txt"
+        )
+        return
+
+    file_path = os.path.expanduser(" ".join(args))
+
+    if not os.path.exists(file_path):
+        await update.message.reply_text(f"File not found: {file_path}")
+        return
+
+    file_size = os.path.getsize(file_path)
+    if file_size > 50 * 1024 * 1024:  # 50MB Telegram limit
+        await update.message.reply_text(f"File too large ({file_size // 1024 // 1024}MB). Telegram limit is 50MB.")
+        return
+
+    try:
+        await update.message.reply_text(f"Uploading {os.path.basename(file_path)}...")
+        with open(file_path, "rb") as f:
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=f,
+                filename=os.path.basename(file_path),
+                caption=f"{os.path.basename(file_path)} ({file_size // 1024}KB)",
+            )
+    except Exception as e:
+        await update.message.reply_text(f"Upload failed: {e}")
+
+
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global _last_activity
     if not is_allowed(update.effective_user.id):
@@ -367,14 +437,16 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await _run_with_progress(
+        result = await _run_with_progress(
             update, context,
             queue_manager.enqueue_prompt(user_id, text, handle_message)
         )
 
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        for chunk in split_message(response):
+        response_text, file_to_send = _unpack_result(result)
+        for chunk in split_message(response_text):
             await safe_reply(update.message, chunk)
+        await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -398,13 +470,15 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await _run_with_progress(
+        result = await _run_with_progress(
             update, context,
             queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct)
         )
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        for chunk in split_message(response):
+        response_text, file_to_send = _unpack_result(result)
+        for chunk in split_message(response_text):
             await safe_reply(update.message, chunk)
+        await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -432,10 +506,12 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, transcription, handle_message_direct))
+        result = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, transcription, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        for chunk in split_message(response):
+        response_text, file_to_send = _unpack_result(result)
+        for chunk in split_message(response_text):
             await safe_reply(update.message, chunk)
+        await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -473,10 +549,12 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
+        result = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        for chunk in split_message(response):
+        response_text, file_to_send = _unpack_result(result)
+        for chunk in split_message(response_text):
             await safe_reply(update.message, chunk)
+        await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -515,10 +593,12 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pending > 0:
             await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
-        response = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
+        result = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        for chunk in split_message(response):
+        response_text, file_to_send = _unpack_result(result)
+        for chunk in split_message(response_text):
             await safe_reply(update.message, chunk)
+        await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -667,6 +747,7 @@ def main():
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("session", session_command))
     app.add_handler(CommandHandler("sessions", sessions_command))
+    app.add_handler(CommandHandler("upload", upload_command))
     app.add_handler(CommandHandler("context", context_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))

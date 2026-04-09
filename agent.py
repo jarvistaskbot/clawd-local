@@ -79,18 +79,25 @@ def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dic
             cwd=WORKSPACE_DIR,
             start_new_session=True,
         )
+        stderr = result.stderr.strip()
+        stdout_out = result.stdout.strip()
+        combined = (stderr + " " + stdout_out).lower()
+        # Detect auth failure in both error path and successful returncode path
+        is_auth_error = (
+            "401" in combined or
+            "authentication_error" in combined or
+            "invalid authentication" in combined or
+            "invalid api key" in combined or
+            ("credentials" in combined and ("invalid" in combined or "expired" in combined))
+        )
+        if is_auth_error:
+            logger.error("[Claude] Auth failure detected (code %s) — notify user", result.returncode)
+            return {"response": (
+                "Claude authentication failed (401).\n\n"
+                "Check Anthropic Extra Usage balance at console.anthropic.com\n"
+                "Or re-login: `claude logout && claude login`"
+            ), "session_id": None, "auth_error": True}
         if result.returncode != 0:
-            stderr = result.stderr.strip()
-            stdout_err = result.stdout.strip()
-            combined = (stderr + " " + stdout_err).lower()
-            # Detect auth failure specifically
-            if "401" in combined or "authentication" in combined or "invalid authentication" in combined or "credentials" in combined:
-                logger.error("[Claude] Auth failure detected (code %s) — notify user", result.returncode)
-                return {"response": (
-                    "🔐 *Claude authentication expired.*\n\n"
-                    "Run this on Mac Mini terminal:\n`claude logout && claude login`\n\n"
-                    "Then send any message here to resume."
-                ), "session_id": None, "auth_error": True}
             if stderr:
                 return {"response": f"Error from Claude CLI:\n{stderr}", "session_id": None}
             return {"response": f"Claude CLI exited with code {result.returncode}", "session_id": None}
@@ -170,7 +177,16 @@ async def handle_message(user_id: int, message: str, skip_optimize: bool = False
 
     add_message(session_id, "user", message)
     add_message(session_id, "assistant", response)
-    return response
+
+    # Check for file send marker in response
+    import re
+    file_to_send = None
+    file_match = re.search(r"\[SEND_FILE:\s*([^\]]+)\]", response)
+    if file_match:
+        file_to_send = file_match.group(1).strip()
+        response = re.sub(r"\[SEND_FILE:\s*[^\]]+\]", "", response).strip()
+
+    return {"text": response, "file": file_to_send}
 
 # Project auto-detection keywords
 PROJECT_KEYWORDS = {

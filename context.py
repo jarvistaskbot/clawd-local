@@ -67,6 +67,7 @@ def build_system_context() -> str:
         f"[SYSTEM CONTEXT — loaded from OpenClaw workspace at {today}]\n"
         "You are Arto's AI assistant. The following is your persistent memory and context.\n"
         "Use it to answer questions about past work, decisions, and ongoing projects.\n"
+        "To send a file to the user, include [SEND_FILE: /absolute/path/to/file] anywhere in your response.\n"
         "---\n"
     )
     return header + "\n\n".join(sections) + "\n\n[END SYSTEM CONTEXT]\n"
