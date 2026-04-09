@@ -405,8 +405,18 @@ async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"File too large ({file_size // 1024 // 1024}MB). Telegram limit is 50MB.")
         return
 
+    # Check read permission before attempting upload
+    if not os.access(file_path, os.R_OK):
+        await update.message.reply_text(
+            f"⚠️ Permission denied: cannot read `{file_path}`\n\n"
+            f"The bot runs as `openclaw` user. If the file is on Desktop or in a restricted folder, "
+            f"copy it first:\n`cp {file_path} ~/clawd-local/`\n"
+            f"Then: `/upload ~/clawd-local/{os.path.basename(file_path)}`"
+        )
+        return
+
     try:
-        await update.message.reply_text(f"Uploading {os.path.basename(file_path)}...")
+        await update.message.reply_text(f"📤 Uploading {os.path.basename(file_path)}...")
         with open(file_path, "rb") as f:
             await context.bot.send_document(
                 chat_id=update.effective_chat.id,
@@ -414,6 +424,11 @@ async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 filename=os.path.basename(file_path),
                 caption=f"{os.path.basename(file_path)} ({file_size // 1024}KB)",
             )
+    except PermissionError:
+        await update.message.reply_text(
+            f"⚠️ Permission denied: `{file_path}`\n"
+            f"Copy to `~/clawd-local/` first, then upload from there."
+        )
     except Exception as e:
         await update.message.reply_text(f"Upload failed: {e}")
 
