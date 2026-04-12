@@ -51,8 +51,8 @@ def format_prompt(history: list[dict], current_message: str) -> str:
 
 
 def estimate_timeout(prompt: str):
-    """Return None = no timeout. Claude runs until it finishes, no matter how long."""
-    return None
+    """Max 20 minutes — prevents infinite hang."""
+    return 1200  # 20 minutes hard cap
 
 
 def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dict:

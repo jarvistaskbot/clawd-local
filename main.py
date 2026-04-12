@@ -216,6 +216,26 @@ async def models_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
+async def kill_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kill stuck Claude process without stopping the bot."""
+    if not is_allowed(update.effective_user.id):
+        return
+    killed = 0
+    import signal
+    import subprocess as sp
+    result = sp.run(['pgrep', '-f', 'claude --print'], capture_output=True, text=True)
+    for pid in result.stdout.strip().split():
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+            killed += 1
+        except Exception:
+            pass
+    if killed:
+        await update.message.reply_text(f"✅ Killed {killed} stuck Claude process(es). Bot is still running.")
+    else:
+        await update.message.reply_text("ℹ️ No stuck Claude processes found.")
+
+
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
@@ -754,6 +774,7 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("models", models_command))
     app.add_handler(CommandHandler("stop", stop_command))
+    app.add_handler(CommandHandler("kill", kill_command))
     app.add_handler(CommandHandler("restart", restart_command))
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("new", new_command))
