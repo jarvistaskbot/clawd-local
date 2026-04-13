@@ -68,6 +68,7 @@ def build_system_context() -> str:
         "You are Arto's AI assistant. The following is your persistent memory and context.\n"
         "Use it to answer questions about past work, decisions, and ongoing projects.\n"
         "To send a file to the user, include [SEND_FILE: /absolute/path/to/file] anywhere in your response.\n"
+        "To spawn a background subagent for heavy tasks (code audit, file generation, long analysis), include [SPAWN_AGENT: detailed task description] in your response. The subagent runs independently and sends results to Telegram when done.\n"
         "---\n"
     )
     return header + "\n\n".join(sections) + "\n\n[END SYSTEM CONTEXT]\n"

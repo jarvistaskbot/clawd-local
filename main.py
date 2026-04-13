@@ -22,6 +22,7 @@ from memory import (
     reset_project_session, get_project_claude_session_id,
 )
 from agent import handle_message
+from subagent import spawn_subagent, list_subagents, kill_subagent, cleanup_done_subagents
 
 async def handle_message_direct(user_id: int, message: str) -> dict:
     """Handle message skipping OpenAI optimization — used for media (images, voice, video)."""
@@ -66,6 +67,7 @@ logger = logging.getLogger(__name__)
 
 _last_activity: Optional[str] = None
 _start_time: Optional[datetime] = None
+bot_instance = None  # Set at startup for subagent notifications
 
 
 def is_allowed(user_id: int) -> bool:
@@ -102,10 +104,10 @@ async def safe_reply(message, text: str):
 
 
 def _unpack_result(result) -> tuple:
-    """Unpack agent result into (text, file_path). Handles both dict and str."""
+    """Unpack agent result into (text, file_path, spawn_task). Handles both dict and str."""
     if isinstance(result, dict):
-        return result.get("text", ""), result.get("file")
-    return result, None
+        return result.get("text", ""), result.get("file"), result.get("spawn_task")
+    return result, None, None
 
 
 async def _send_file_if_requested(context, chat_id: int, file_to_send: str):
@@ -129,6 +131,35 @@ async def _send_file_if_requested(context, chat_id: int, file_to_send: str):
             chat_id=chat_id,
             text=f"Claude tried to send a file but it was not found: {file_path}",
         )
+
+
+async def _subagent_notify(user_id: int, agent_id: str, result: str, success: bool):
+    """Called when a subagent finishes — sends result to Telegram."""
+    if not bot_instance:
+        logger.error("Cannot notify subagent result: bot_instance not set")
+        return
+    emoji = "✅" if success else "❌"
+    header = f"{emoji} Subagent {agent_id} finished\n\n"
+    for chunk in split_message(header + result):
+        try:
+            await bot_instance.send_message(chat_id=user_id, text=chunk)
+        except Exception as e:
+            logger.error("Failed to notify subagent result: %s", e)
+
+
+async def _handle_spawn(user_id: int, chat_id: int, spawn_task: str):
+    """Spawn a subagent and notify the user."""
+    if not spawn_task:
+        return
+    agent_id = await spawn_subagent(user_id, spawn_task, _subagent_notify)
+    if bot_instance:
+        try:
+            await bot_instance.send_message(
+                chat_id=chat_id,
+                text=f"🤖 Subagent spawned (id: {agent_id})\nRunning: {spawn_task[:80]}...",
+            )
+        except Exception as e:
+            logger.error("Failed to send spawn notification: %s", e)
 
 
 def _check_claude_cli() -> str:
@@ -195,6 +226,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/stop - Shut down the bot\n"
         "/restart - Restart the bot\n"
         "/upload <path> - Send a local file to Telegram\n"
+        "/agents - List running subagents\n"
+        "/agents kill <id> - Kill a subagent\n"
         "/help - Show this help\n\n"
         "Send any text message to chat with Claude."
     )
@@ -479,10 +512,11 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        response_text, file_to_send = _unpack_result(result)
+        response_text, file_to_send, spawn_task = _unpack_result(result)
         for chunk in split_message(response_text):
             await safe_reply(update.message, chunk)
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
+        await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -511,10 +545,11 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct)
         )
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        response_text, file_to_send = _unpack_result(result)
+        response_text, file_to_send, spawn_task = _unpack_result(result)
         for chunk in split_message(response_text):
             await safe_reply(update.message, chunk)
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
+        await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -544,10 +579,11 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         result = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, transcription, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        response_text, file_to_send = _unpack_result(result)
+        response_text, file_to_send, spawn_task = _unpack_result(result)
         for chunk in split_message(response_text):
             await safe_reply(update.message, chunk)
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
+        await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -587,10 +623,11 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         result = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        response_text, file_to_send = _unpack_result(result)
+        response_text, file_to_send, spawn_task = _unpack_result(result)
         for chunk in split_message(response_text):
             await safe_reply(update.message, chunk)
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
+        await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -631,10 +668,11 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         result = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        response_text, file_to_send = _unpack_result(result)
+        response_text, file_to_send, spawn_task = _unpack_result(result)
         for chunk in split_message(response_text):
             await safe_reply(update.message, chunk)
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
+        await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
         await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
@@ -643,6 +681,41 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         if local_path:
             cleanup_temp_file(local_path)
+
+
+async def agents_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /agents — list subagents, /agents kill <id> — kill a subagent."""
+    if not is_allowed(update.effective_user.id):
+        return
+    args = context.args or []
+
+    if args and args[0] == "kill" and len(args) >= 2:
+        agent_id = args[1]
+        if kill_subagent(agent_id):
+            await update.message.reply_text(f"Killed subagent {agent_id}")
+        else:
+            await update.message.reply_text(f"Subagent {agent_id} not found or not running")
+        return
+
+    if args and args[0] == "clean":
+        cleanup_done_subagents()
+        await update.message.reply_text("Cleaned up finished subagents.")
+        return
+
+    agents = list_subagents()
+    if not agents:
+        await update.message.reply_text("No subagents running.")
+        return
+
+    lines = ["🤖 Subagents:\n"]
+    for a in agents:
+        elapsed = datetime.now() - a["started_at"]
+        mins = int(elapsed.total_seconds() // 60)
+        lines.append(
+            f"  {a['id']} [{a['status']}] {mins}m — {a['task']}"
+        )
+    lines.append("\nUse /agents kill <id> to stop one.")
+    await update.message.reply_text("\n".join(lines))
 
 
 async def session_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -785,6 +858,7 @@ def main():
     app.add_handler(CommandHandler("session", session_command))
     app.add_handler(CommandHandler("sessions", sessions_command))
     app.add_handler(CommandHandler("upload", upload_command))
+    app.add_handler(CommandHandler("agents", agents_command))
     app.add_handler(CommandHandler("context", context_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
@@ -793,6 +867,8 @@ def main():
     app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
 
     async def post_init(application):
+        global bot_instance
+        bot_instance = application.bot
         queue_manager.start()
         asyncio.create_task(run_watchdog(interval_seconds=60, send_alert=_send_telegram_alert))
         logger.info("Queue manager and watchdog started.")

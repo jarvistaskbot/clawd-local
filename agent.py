@@ -186,7 +186,14 @@ async def handle_message(user_id: int, message: str, skip_optimize: bool = False
         file_to_send = file_match.group(1).strip()
         response = re.sub(r"\[SEND_FILE:\s*[^\]]+\]", "", response).strip()
 
-    return {"text": response, "file": file_to_send}
+    # Check for subagent spawn marker in response
+    spawn_task = None
+    spawn_match = re.search(r"\[SPAWN_AGENT:\s*([^\]]+)\]", response)
+    if spawn_match:
+        spawn_task = spawn_match.group(1).strip()
+        response = re.sub(r"\[SPAWN_AGENT:\s*[^\]]+\]", "", response).strip()
+
+    return {"text": response, "file": file_to_send, "spawn_task": spawn_task}
 
 # Project auto-detection keywords
 PROJECT_KEYWORDS = {
