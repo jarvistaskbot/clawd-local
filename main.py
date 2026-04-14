@@ -360,7 +360,8 @@ async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
         loop = asyncio.get_event_loop()
         from agent import call_claude
-        summary = await loop.run_in_executor(None, call_claude, summary_prompt, 300)
+        result = await loop.run_in_executor(None, call_claude, summary_prompt, 300)
+        summary = result.get("response", "") if isinstance(result, dict) else str(result)
 
         # Clear old history and replace with summary
         from memory import clear_last_messages
