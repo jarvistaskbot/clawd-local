@@ -16,7 +16,7 @@ from config import (
     CLAUDE_CLI_PATH, CLAUDE_MODEL, OPENAI_ENABLED, OPENAI_MODEL,
 )
 from memory import (
-    init_db, get_or_create_session, get_history, reset_session, get_stats, clear_last_messages,
+    init_db, get_or_create_session, get_history, add_message, reset_session, get_stats, clear_last_messages,
     get_active_project, set_active_project, get_or_create_project_session,
     get_or_create_project_chat_session, list_project_sessions, delete_project_session,
     reset_project_session, get_project_claude_session_id,
@@ -329,6 +329,51 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session_id = get_or_create_project_chat_session(user_id, project_name)
     deleted = clear_last_messages(session_id, count)
     await update.message.reply_text(f"🗑 Cleared last {deleted} messages from project '{project_name}'.")
+
+
+async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Summarize conversation history into a compact form to save context space."""
+    if not is_allowed(update.effective_user.id):
+        return
+    user_id = update.effective_user.id
+    project_name = get_active_project(user_id)
+    session_id = get_or_create_project_chat_session(user_id, project_name)
+    messages = get_history(session_id, limit=50)
+
+    if len(messages) < 4:
+        await update.message.reply_text("Not enough history to compact (need at least 4 messages).")
+        return
+
+    await update.message.reply_text(f"🗜 Compacting {len(messages)} messages...")
+
+    # Build conversation text for summarization
+    conv_text = "\n".join(
+        f"{m['role'].upper()}: {m['content'][:500]}" for m in messages
+    )
+    summary_prompt = (
+        f"Summarize this conversation history concisely in bullet points. "
+        f"Preserve all important decisions, facts, code changes, and context. "
+        f"Be thorough but compact.\n\n{conv_text}"
+    )
+
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+        loop = asyncio.get_event_loop()
+        from agent import call_claude
+        summary = await loop.run_in_executor(None, call_claude, summary_prompt, 300)
+
+        # Clear old history and replace with summary
+        from memory import clear_last_messages
+        clear_last_messages(session_id, len(messages))
+        add_message(session_id, "assistant",
+            f"[COMPACTED CONTEXT — {len(messages)} messages summarized]\n\n{summary}")
+
+        await update.message.reply_text(
+            f"✅ Compacted {len(messages)} messages into summary.\n\n"
+            f"**Summary:**\n{summary[:2000]}"
+        )
+    except Exception as e:
+        await update.message.reply_text(f"Compact failed: {e}")
 
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -861,6 +906,7 @@ def main():
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("new", new_command))
     app.add_handler(CommandHandler("clear", clear_command))
+    app.add_handler(CommandHandler("compact", compact_command))
     app.add_handler(CommandHandler("history", history_command))
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("status", status_command))
