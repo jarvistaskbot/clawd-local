@@ -256,17 +256,26 @@ async def kill_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     killed = 0
     import signal
     import subprocess as sp
-    result = sp.run(['pgrep', '-f', 'claude --print'], capture_output=True, text=True)
-    for pid in result.stdout.strip().split():
+    # Try multiple patterns to catch all claude processes
+    patterns = ['claude --print', 'claude --model', '/claude ']
+    pids = set()
+    for pattern in patterns:
+        result = sp.run(['pgrep', '-f', pattern], capture_output=True, text=True)
+        for pid in result.stdout.strip().split():
+            if pid.strip():
+                pids.add(pid.strip())
+    for pid in pids:
         try:
-            os.kill(int(pid), signal.SIGTERM)
+            os.kill(int(pid), signal.SIGKILL)  # SIGKILL not SIGTERM — force kill
             killed += 1
         except Exception:
             pass
     if killed:
-        await update.message.reply_text(f"✅ Killed {killed} stuck Claude process(es). Bot is still running.")
+        await update.message.reply_text(f"✅ Force-killed {killed} Claude process(es). Bot is still running.")
     else:
-        await update.message.reply_text("ℹ️ No stuck Claude processes found.")
+        # Last resort: kill by executable name
+        sp.run(['pkill', '-9', '-f', 'claude'], capture_output=True)
+        await update.message.reply_text("✅ Sent kill signal to all claude processes. Bot still running.")
 
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
