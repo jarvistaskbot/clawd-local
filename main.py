@@ -253,29 +253,36 @@ async def kill_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Kill stuck Claude process without stopping the bot."""
     if not is_allowed(update.effective_user.id):
         return
-    killed = 0
     import signal
     import subprocess as sp
-    # Try multiple patterns to catch all claude processes
-    patterns = ['claude --print', 'claude --model', '/claude ']
-    pids = set()
-    for pattern in patterns:
-        result = sp.run(['pgrep', '-f', pattern], capture_output=True, text=True)
-        for pid in result.stdout.strip().split():
-            if pid.strip():
-                pids.add(pid.strip())
-    for pid in pids:
+
+    bot_pid = os.getpid()
+    killed = 0
+
+    # Get all claude-related PIDs except the bot itself
+    result = sp.run(['pgrep', '-f', 'claude'], capture_output=True, text=True)
+    pids = [p.strip() for p in result.stdout.strip().split() if p.strip()]
+
+    for pid_str in pids:
         try:
-            os.kill(int(pid), signal.SIGKILL)  # SIGKILL not SIGTERM — force kill
-            killed += 1
+            pid = int(pid_str)
+            if pid == bot_pid:
+                continue  # Never kill ourselves
+            # Check process name to avoid killing unrelated processes
+            name_result = sp.run(['ps', '-p', str(pid), '-o', 'command='], capture_output=True, text=True)
+            cmd = name_result.stdout.strip()
+            if 'claude' in cmd.lower() or '--print' in cmd or '--model' in cmd:
+                os.kill(pid, signal.SIGKILL)
+                killed += 1
         except Exception:
             pass
+
     if killed:
-        await update.message.reply_text(f"✅ Force-killed {killed} Claude process(es). Bot is still running.")
+        await update.message.reply_text(f"✅ Killed {killed} Claude process(es). Bot still running.")
     else:
-        # Last resort: kill by executable name
-        sp.run(['pkill', '-9', '-f', 'claude'], capture_output=True)
-        await update.message.reply_text("✅ Sent kill signal to all claude processes. Bot still running.")
+        # Broader kill — any non-bot process with claude in command
+        sp.run(f'pgrep -f claude | grep -v {bot_pid} | xargs kill -9 2>/dev/null', shell=True)
+        await update.message.reply_text("✅ Kill signal sent. Bot still running.")
 
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
