@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -20,6 +21,8 @@ from memory import (
     get_active_project, set_active_project, get_or_create_project_session,
     get_or_create_project_chat_session, list_project_sessions, delete_project_session,
     reset_project_session, get_project_claude_session_id,
+    log_telegram_message, search_telegram_log,
+    get_thread_project, set_thread_project, list_thread_projects,
 )
 from agent import handle_message
 from subagent import spawn_subagent, list_subagents, kill_subagent, cleanup_done_subagents
@@ -175,6 +178,33 @@ def _check_claude_cli() -> str:
     return "unavailable"
 
 
+def _get_message_thread_id(message) -> Optional[int]:
+    """Return thread_id for this message: forum thread ID or None."""
+    return getattr(message, "message_thread_id", None)
+
+
+def _resolve_thread_project(user_id: int, chat_id: int, thread_id: Optional[int]) -> Optional[str]:
+    """If this message is in a known thread, return the mapped project name."""
+    if thread_id is None:
+        return None
+    return get_thread_project(chat_id, thread_id)
+
+
+async def safe_reply_in_thread(message, text: str, thread_id: Optional[int] = None):
+    """Reply to message. In forum threads, sends to same thread. Falls back to plain text."""
+    kwargs = {}
+    if thread_id is not None:
+        kwargs["message_thread_id"] = thread_id
+    try:
+        await message.reply_text(text, parse_mode="Markdown", **kwargs)
+    except Exception:
+        plain = re.sub(r'[*_`\[\]()]', '', text)
+        try:
+            await message.reply_text(plain, **kwargs)
+        except Exception:
+            await message.reply_text(plain)
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
@@ -228,6 +258,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/upload <path> - Send a local file to Telegram\n"
         "/agents - List running subagents\n"
         "/agents kill <id> - Kill a subagent\n"
+        "/thread set <project> - Tag this thread to a project\n"
+        "/thread list - List thread→project mappings\n"
+        "/search <keyword> - Search past messages\n"
         "/help - Show this help\n\n"
         "Send any text message to chat with Claude."
     )
@@ -549,14 +582,75 @@ async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Upload failed: {e}")
 
 
+PROJECT_KEYWORDS = {
+    # Removed "chrome" (too generic: "chrome browser is slow" is a FP)
+    "tls": ["tls", "germany", "italy", "cyprus", "visa", "appointment", "booking", "tlscontact",
+            "extension", "cloudflare", "cf", "1015", "pac", "proxy", "slot"],
+    # Removed "spot" ("good spot today" FP) and "trade" ("trade ideas" FP)
+    "arbitrage": ["arbitrage", "bybit", "binance", "trading", "funding", "basis", "perp",
+                  "futures", "delivery", "delta", "pnl", "p&l", "position",
+                  "bot open", "bot close", "usdt", "mnt", "xaut", "doge"],
+}
+_DETECT_THRESHOLD = 2
+
+
+def _detect_project(text: str):
+    """Return project name if keyword score >= threshold, else None.
+
+    Uses word-boundary matching for single-word keywords to prevent substring
+    false positives (e.g. "pac" matching "impact"). Compound keywords like
+    "bot open" use plain substring matching.
+    Threshold of 2 means a single generic keyword never fires alone.
+    """
+    lower = text.lower()
+    scores = {}
+    for project, keywords in PROJECT_KEYWORDS.items():
+        score = 0
+        for kw in keywords:
+            if " " in kw:
+                if kw in lower:
+                    score += 1
+            else:
+                if re.search(r'\b' + re.escape(kw) + r'\b', lower):
+                    score += 1
+        if score >= _DETECT_THRESHOLD:
+            scores[project] = score
+    if not scores:
+        return None
+    return max(scores, key=scores.get)
+
+
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global _last_activity
     if not is_allowed(update.effective_user.id):
         return
     user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
     text = update.message.text
     if not text:
         return
+
+    thread_id = _get_message_thread_id(update.message)
+    sender = update.effective_user
+    sender_name = sender.username or sender.full_name or str(user_id)
+
+    # Log incoming message
+    log_telegram_message(
+        chat_id=chat_id,
+        direction="in",
+        content=text,
+        telegram_message_id=update.message.message_id,
+        thread_id=thread_id,
+        sender_id=user_id,
+        sender_name=sender_name,
+    )
+
+    # Thread → project routing: if this thread is mapped, switch to that project
+    thread_project = _resolve_thread_project(user_id, chat_id, thread_id)
+    if thread_project and thread_project != get_active_project(user_id):
+        set_active_project(user_id, thread_project)
+        get_or_create_project_session(user_id, thread_project)
+        get_or_create_project_chat_session(user_id, thread_project)
 
     # Reply-to-message context
     if update.message.reply_to_message and update.message.reply_to_message.text:
@@ -576,7 +670,11 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         response_text, file_to_send, spawn_task = _unpack_result(result)
         for chunk in split_message(response_text):
-            await safe_reply(update.message, chunk)
+            await safe_reply_in_thread(update.message, chunk, thread_id)
+            log_telegram_message(
+                chat_id=chat_id, direction="out", content=chunk,
+                thread_id=thread_id, sender_name="bot",
+            )
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
         await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
@@ -780,6 +878,93 @@ async def agents_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
+async def thread_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/thread set <project> — tag current thread to a project.
+    /thread list — list thread→project mappings.
+    /thread clear — remove mapping for current thread."""
+    if not is_allowed(update.effective_user.id):
+        return
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    thread_id = _get_message_thread_id(update.message)
+    args = context.args or []
+
+    if not args or args[0] == "list":
+        mappings = list_thread_projects(chat_id)
+        if not mappings:
+            await update.message.reply_text("No thread→project mappings set.\n\nUse: /thread set <project>")
+            return
+        lines = ["Thread→Project mappings:\n"]
+        for m in mappings:
+            lines.append(f"  Thread {m['thread_id']} → {m['project_name']}")
+        await update.message.reply_text("\n".join(lines))
+        return
+
+    if args[0] == "set":
+        if len(args) < 2:
+            await update.message.reply_text("Usage: /thread set <project_name>")
+            return
+        if thread_id is None:
+            await update.message.reply_text(
+                "This message is not in a forum thread.\n"
+                "Thread routing works in Telegram supergroups with Topics enabled."
+            )
+            return
+        project_name = args[1].lower()
+        set_thread_project(chat_id, thread_id, project_name)
+        # Also switch active project
+        set_active_project(user_id, project_name)
+        get_or_create_project_session(user_id, project_name)
+        get_or_create_project_chat_session(user_id, project_name)
+        await update.message.reply_text(
+            f"Thread {thread_id} → project '{project_name}'\n"
+            f"Messages in this thread will use the '{project_name}' project session."
+        )
+        return
+
+    if args[0] == "clear":
+        if thread_id is None:
+            await update.message.reply_text("No thread detected in this message.")
+            return
+        from memory import _connect as _mem_connect
+        conn = _mem_connect()
+        conn.execute("DELETE FROM thread_projects WHERE chat_id = ? AND thread_id = ?", (chat_id, thread_id))
+        conn.commit()
+        conn.close()
+        await update.message.reply_text(f"Cleared mapping for thread {thread_id}.")
+        return
+
+    await update.message.reply_text(
+        "Usage:\n"
+        "/thread set <project> — tag this thread to a project\n"
+        "/thread list — list all mappings\n"
+        "/thread clear — remove mapping for this thread"
+    )
+
+
+async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/search <keyword> — search past Telegram messages."""
+    if not is_allowed(update.effective_user.id):
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /search <keyword>")
+        return
+    query = " ".join(context.args)
+    results = search_telegram_log(query, limit=10)
+    if not results:
+        await update.message.reply_text(f"No messages found matching: {query}")
+        return
+    lines = [f"Search results for '{query}':\n"]
+    for r in results:
+        direction = "→" if r["direction"] == "out" else "←"
+        ts = r["timestamp"][:16]
+        sender = r["sender_name"] or ("bot" if r["direction"] == "out" else "?")
+        snippet = r["content"][:200]
+        thread_info = f" [thread {r['thread_id']}]" if r["thread_id"] else ""
+        lines.append(f"{direction} [{ts}]{thread_info} {sender}: {snippet}")
+    await update.message.reply_text("\n\n".join(lines))
+
+
 async def session_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /session <name>, /session new <name>, /session delete <name>."""
     if not is_allowed(update.effective_user.id):
@@ -923,6 +1108,8 @@ def main():
     app.add_handler(CommandHandler("upload", upload_command))
     app.add_handler(CommandHandler("agents", agents_command))
     app.add_handler(CommandHandler("context", context_command))
+    app.add_handler(CommandHandler("thread", thread_command))
+    app.add_handler(CommandHandler("search", search_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, voice_handler))

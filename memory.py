@@ -42,8 +42,28 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             project_name TEXT NOT NULL DEFAULT 'general'
         );
+        CREATE TABLE IF NOT EXISTS telegram_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_message_id INTEGER,
+            chat_id INTEGER NOT NULL,
+            thread_id INTEGER,
+            sender_id INTEGER,
+            sender_name TEXT,
+            direction TEXT NOT NULL,
+            content TEXT NOT NULL,
+            timestamp TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS thread_projects (
+            chat_id INTEGER NOT NULL,
+            thread_id INTEGER NOT NULL,
+            project_name TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (chat_id, thread_id)
+        );
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
         CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
+        CREATE INDEX IF NOT EXISTS idx_telegram_log_chat ON telegram_log(chat_id, thread_id);
+        CREATE INDEX IF NOT EXISTS idx_telegram_log_msg ON telegram_log(telegram_message_id);
     """)
     conn.close()
 
@@ -311,6 +331,79 @@ def get_or_create_project_chat_session(user_id: int, project_name: str) -> int:
     conn.commit()
     conn.close()
     return session_id
+
+
+# --- Telegram Message Log ---
+
+def log_telegram_message(
+    chat_id: int,
+    direction: str,  # "in" or "out"
+    content: str,
+    telegram_message_id: Optional[int] = None,
+    thread_id: Optional[int] = None,
+    sender_id: Optional[int] = None,
+    sender_name: Optional[str] = None,
+) -> int:
+    """Log a Telegram message (incoming or outgoing). Returns the log row id."""
+    conn = _connect()
+    now = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        "INSERT INTO telegram_log (telegram_message_id, chat_id, thread_id, sender_id, sender_name, direction, content, timestamp) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (telegram_message_id, chat_id, thread_id, sender_id, sender_name, direction, content, now),
+    )
+    conn.commit()
+    conn.close()
+    return cur.lastrowid
+
+
+def search_telegram_log(query: str, limit: int = 20) -> list[dict]:
+    """Full-text search over telegram_log content."""
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT telegram_message_id, chat_id, thread_id, sender_name, direction, content, timestamp "
+        "FROM telegram_log WHERE content LIKE ? ORDER BY id DESC LIMIT ?",
+        (f"%{query}%", limit),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# --- Thread → Project Mapping ---
+
+def get_thread_project(chat_id: int, thread_id: int) -> Optional[str]:
+    """Return the project name mapped to this thread, or None."""
+    conn = _connect()
+    row = conn.execute(
+        "SELECT project_name FROM thread_projects WHERE chat_id = ? AND thread_id = ?",
+        (chat_id, thread_id),
+    ).fetchone()
+    conn.close()
+    return row["project_name"] if row else None
+
+
+def set_thread_project(chat_id: int, thread_id: int, project_name: str) -> None:
+    """Map a thread to a project session."""
+    conn = _connect()
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO thread_projects (chat_id, thread_id, project_name, created_at) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(chat_id, thread_id) DO UPDATE SET project_name = excluded.project_name",
+        (chat_id, thread_id, project_name, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_thread_projects(chat_id: int) -> list[dict]:
+    """List all thread→project mappings for a chat."""
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT thread_id, project_name, created_at FROM thread_projects WHERE chat_id = ? ORDER BY created_at DESC",
+        (chat_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def reset_project_session(user_id: int, project_name: str) -> int:
