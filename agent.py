@@ -2,8 +2,28 @@ import asyncio
 import json
 import logging
 import subprocess
+import threading
 
 logger = logging.getLogger(__name__)
+
+# ── Active process tracking — allows /kill to abort in-flight Claude calls ────
+_active_proc = None  # type: subprocess.Popen | None
+_active_proc_lock = threading.Lock()
+_task_aborted = threading.Event()
+
+
+def abort_current_task():
+    """Kill the active Claude subprocess and mark the task as aborted.
+    Called by /kill — safe to call from the asyncio thread."""
+    global _active_proc
+    _task_aborted.set()
+    with _active_proc_lock:
+        proc = _active_proc
+    if proc is not None:
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 from config import (
     CLAUDE_CLI_PATH, CLAUDE_MODEL, CLAUDE_TIMEOUT,
@@ -58,7 +78,9 @@ def estimate_timeout(prompt: str):
 def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dict:
     """Call Claude CLI. Returns dict: {response: str, session_id: str | None}.
     Uses --resume if claude_session_id is provided for session continuity.
+    Tracks the active Popen so abort_current_task() can kill it mid-run.
     """
+    global _active_proc
     dynamic_timeout = timeout or estimate_timeout(prompt)
     cmd = [
         CLAUDE_CLI_PATH,
@@ -71,39 +93,54 @@ def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dic
         cmd.extend(["--resume", claude_session_id])
     cmd.append(prompt)
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=dynamic_timeout,
             cwd=WORKSPACE_DIR,
             start_new_session=True,
         )
-        stderr = result.stderr.strip()
-        stdout_out = result.stdout.strip()
-        combined = (stderr + " " + stdout_out).lower()
-        # Detect auth failure in both error path and successful returncode path
-        is_auth_error = (
-            "401" in combined or
-            "authentication_error" in combined or
-            "invalid authentication" in combined or
-            "invalid api key" in combined or
-            ("credentials" in combined and ("invalid" in combined or "expired" in combined))
-        )
-        if is_auth_error:
-            logger.error("[Claude] Auth failure detected (code %s) — notify user", result.returncode)
-            return {"response": (
-                "Claude authentication failed (401).\n\n"
-                "Check Anthropic Extra Usage balance at console.anthropic.com\n"
-                "Or re-login: `claude logout && claude login`"
-            ), "session_id": None, "auth_error": True}
-        if result.returncode != 0:
+        with _active_proc_lock:
+            _active_proc = proc
+
+        try:
+            stdout_raw, stderr_raw = proc.communicate(timeout=dynamic_timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            return {"response": f"Claude CLI timed out after {dynamic_timeout}s. Try breaking the task into smaller steps.", "session_id": None}
+        finally:
+            with _active_proc_lock:
+                _active_proc = None
+
+        # If task was aborted externally, return sentinel so handle_message skips the response
+        if _task_aborted.is_set():
+            return {"response": None, "session_id": None, "aborted": True}
+
+        returncode = proc.returncode
+        stderr = stderr_raw.strip()
+        if returncode != 0:
+            stderr_lower = stderr.lower()
+            is_auth_error = (
+                "authentication_error" in stderr_lower or
+                "invalid authentication" in stderr_lower or
+                "invalid api key" in stderr_lower or
+                ("401" in stderr_lower and ("anthropic" in stderr_lower or "api" in stderr_lower))
+            )
+            if is_auth_error:
+                logger.error("[Claude] Auth failure detected (code %s) — notify user", returncode)
+                return {"response": (
+                    "Claude authentication failed (401).\n\n"
+                    "Check Anthropic Extra Usage balance at console.anthropic.com\n"
+                    "Or re-login: `claude logout && claude login`"
+                ), "session_id": None, "auth_error": True}
             if stderr:
                 return {"response": f"Error from Claude CLI:\n{stderr}", "session_id": None}
-            return {"response": f"Claude CLI exited with code {result.returncode}", "session_id": None}
+            return {"response": f"Claude CLI exited with code {returncode}", "session_id": None}
 
         # Parse JSON output to extract response and session ID
-        stdout = result.stdout.strip()
+        stdout = stdout_raw.strip()
         try:
             data = json.loads(stdout)
             response_text = data.get("result", "") or data.get("content", "") or ""
@@ -120,8 +157,6 @@ def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dic
             # Fallback: treat as plain text
             return {"response": stdout, "session_id": None}
 
-    except subprocess.TimeoutExpired:
-        return {"response": f"Claude CLI timed out after {dynamic_timeout}s. Try breaking the task into smaller steps.", "session_id": None}
     except FileNotFoundError:
         return {"response": f"Claude CLI not found at '{CLAUDE_CLI_PATH}'. Make sure it's installed and in your PATH.", "session_id": None}
     except Exception as e:
@@ -168,6 +203,11 @@ async def handle_message(user_id: int, message: str, skip_optimize: bool = False
     result = await loop.run_in_executor(
         None, call_claude, prompt, estimate_timeout(optimized), claude_session_id
     )
+
+    # Task was aborted by /kill — discard result, send nothing
+    if result.get("aborted"):
+        _task_aborted.clear()
+        return ""
 
     response = result["response"]
 

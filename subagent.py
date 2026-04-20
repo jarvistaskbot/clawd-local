@@ -37,12 +37,15 @@ async def spawn_subagent(user_id: int, task: str, notify_callback) -> str:
     agent_id = str(uuid.uuid4())[:8]
 
     from config import CLAUDE_CLI_PATH, CLAUDE_MODEL, WORKSPACE_DIR
+    from context import get_context
+    system_context = get_context()
+    full_prompt = f"{system_context}\n\n[Background task requested by user:]\n{task}" if system_context else task
     cmd = [
         CLAUDE_CLI_PATH,
         "--print",
         "--model", CLAUDE_MODEL,
         "--permission-mode", "bypassPermissions",
-        task,
+        full_prompt,
     ]
 
     process = await asyncio.create_subprocess_exec(

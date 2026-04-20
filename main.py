@@ -24,7 +24,7 @@ from memory import (
     log_telegram_message, search_telegram_log,
     get_thread_project, set_thread_project, list_thread_projects,
 )
-from agent import handle_message
+from agent import handle_message, abort_current_task
 from subagent import spawn_subagent, list_subagents, kill_subagent, cleanup_done_subagents
 
 async def handle_message_direct(user_id: int, message: str) -> dict:
@@ -80,6 +80,8 @@ def is_allowed(user_id: int) -> bool:
 
 
 def split_message(text: str, max_len: int = 4096) -> list[str]:
+    if not text:
+        return []
     if len(text) <= max_len:
         return [text]
     chunks = []
@@ -283,39 +285,45 @@ async def models_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def kill_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kill stuck Claude process without stopping the bot."""
+    """Immediately abort any in-flight Claude task, drain the queue, and kill all subagents."""
     if not is_allowed(update.effective_user.id):
         return
     import signal
     import subprocess as sp
 
-    bot_pid = os.getpid()
-    killed = 0
+    # 1. Abort the active Claude subprocess and flag the result to be discarded
+    abort_current_task()
 
-    # Get all claude-related PIDs except the bot itself
-    result = sp.run(['pgrep', '-f', 'claude'], capture_output=True, text=True)
-    pids = [p.strip() for p in result.stdout.strip().split() if p.strip()]
-
-    for pid_str in pids:
+    # 2. Drain the pending queue so no queued messages start running
+    drained = 0
+    while not queue_manager._queue.empty():
         try:
-            pid = int(pid_str)
-            if pid == bot_pid:
-                continue  # Never kill ourselves
-            # Check process name to avoid killing unrelated processes
-            name_result = sp.run(['ps', '-p', str(pid), '-o', 'command='], capture_output=True, text=True)
-            cmd = name_result.stdout.strip()
-            if 'claude' in cmd.lower() or '--print' in cmd or '--model' in cmd:
-                os.kill(pid, signal.SIGKILL)
-                killed += 1
+            queue_manager._queue.get_nowait()
+            queue_manager._queue.task_done()
+            queue_manager._pending_count = max(0, queue_manager._pending_count - 1)
+            drained += 1
         except Exception:
-            pass
+            break
 
-    if killed:
-        await update.message.reply_text(f"✅ Killed {killed} Claude process(es). Bot still running.")
-    else:
-        # Broader kill — any non-bot process with claude in command
-        sp.run(f'pgrep -f claude | grep -v {bot_pid} | xargs kill -9 2>/dev/null', shell=True)
-        await update.message.reply_text("✅ Kill signal sent. Bot still running.")
+    # 3. Kill all running subagents
+    agents_killed = 0
+    for agent in list(list_subagents()):
+        if kill_subagent(agent["id"]):
+            agents_killed += 1
+
+    # 4. Fallback: broad pgrep kill for any lingering Claude processes
+    bot_pid = os.getpid()
+    sp.run(
+        f'pgrep -f "claude --print" | grep -v {bot_pid} | xargs kill -9 2>/dev/null',
+        shell=True
+    )
+
+    parts = ["✅ Killed. Bot is ready."]
+    if drained:
+        parts.append(f"{drained} queued task(s) discarded.")
+    if agents_killed:
+        parts.append(f"{agents_killed} subagent(s) stopped.")
+    await update.message.reply_text(" ".join(parts))
 
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
