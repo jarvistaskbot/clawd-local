@@ -29,6 +29,29 @@ from config import (
     CLAUDE_CLI_PATH, CLAUDE_MODEL, CLAUDE_TIMEOUT,
     MAX_HISTORY_MESSAGES, WORKSPACE_DIR, OPENAI_ENABLED,
 )
+
+# Runtime model override — changed by /model command, defaults to config value
+_current_model = CLAUDE_MODEL
+
+MODEL_ALIASES = {
+    "opus":   "claude-opus-4-6",
+    "sonnet": "claude-sonnet-4-6",
+    "haiku":  "claude-haiku-4-5-20251001",
+}
+
+def set_model(alias_or_id: str) -> str:
+    """Set the active model. Accepts aliases (opus/sonnet/haiku) or full IDs.
+    Returns the resolved model ID, or raises ValueError if unknown."""
+    global _current_model
+    resolved = MODEL_ALIASES.get(alias_or_id.lower(), alias_or_id)
+    valid = set(MODEL_ALIASES.values())
+    if resolved not in valid:
+        raise ValueError(f"Unknown model: {alias_or_id!r}. Use: opus, sonnet, haiku")
+    _current_model = resolved
+    return resolved
+
+def get_model() -> str:
+    return _current_model
 from memory import (
     get_or_create_session, add_message, get_history,
     get_active_project, set_active_project, get_or_create_project_session,
@@ -85,7 +108,7 @@ def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dic
     cmd = [
         CLAUDE_CLI_PATH,
         "--print",
-        "--model", CLAUDE_MODEL,
+        "--model", get_model(),
         "--permission-mode", "bypassPermissions",
         "--output-format", "json",
     ]

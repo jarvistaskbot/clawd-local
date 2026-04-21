@@ -24,7 +24,7 @@ from memory import (
     log_telegram_message, search_telegram_log,
     get_thread_project, set_thread_project, list_thread_projects,
 )
-from agent import handle_message, abort_current_task
+from agent import handle_message, abort_current_task, set_model, get_model, MODEL_ALIASES
 from subagent import spawn_subagent, list_subagents, kill_subagent, cleanup_done_subagents
 
 async def handle_message_direct(user_id: int, message: str) -> dict:
@@ -271,17 +271,29 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def models_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
-    models = [
-        "claude-opus-4-6",
-        "claude-sonnet-4-6",
-        "claude-haiku-3-5",
-    ]
+    current = get_model()
     lines = ["Available models:\n"]
-    for m in models:
-        marker = " (current)" if m == CLAUDE_MODEL else ""
-        lines.append(f"  - {m}{marker}")
-    lines.append(f"\nConfigured model: {CLAUDE_MODEL}")
+    for alias, model_id in MODEL_ALIASES.items():
+        marker = " ✅ (current)" if model_id == current else ""
+        lines.append(f"  /model {alias} — {model_id}{marker}")
     await update.message.reply_text("\n".join(lines))
+
+
+async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
+        return
+    args = context.args
+    if not args:
+        current = get_model()
+        alias = next((a for a, m in MODEL_ALIASES.items() if m == current), current)
+        await update.message.reply_text(f"Current model: {alias} ({current})\nUsage: /model opus|sonnet|haiku")
+        return
+    try:
+        resolved = set_model(args[0])
+        alias = args[0].lower()
+        await update.message.reply_text(f"Model set to: {alias} ({resolved})")
+    except ValueError as e:
+        await update.message.reply_text(str(e))
 
 
 async def kill_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1102,6 +1114,7 @@ def main():
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("models", models_command))
+    app.add_handler(CommandHandler("model", model_command))
     app.add_handler(CommandHandler("stop", stop_command))
     app.add_handler(CommandHandler("kill", kill_command))
     app.add_handler(CommandHandler("restart", restart_command))
