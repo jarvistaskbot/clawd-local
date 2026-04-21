@@ -506,7 +506,8 @@ async def _run_with_progress(update, context, coro):
                 pass
             # Check if we should show/update progress
             elapsed = time.time() - start
-            if next_idx < len(intervals) and elapsed >= intervals[next_idx]:
+            next_threshold = intervals[next_idx] if next_idx < len(intervals) else intervals[-1] + (next_idx - len(intervals) + 1) * 60
+            if elapsed >= next_threshold:
                 next_idx += 1
                 elapsed_int = int(elapsed)
                 label = f"{elapsed_int // 60}min" if elapsed_int >= 120 else f"{elapsed_int}s"
