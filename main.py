@@ -286,7 +286,7 @@ async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         current = get_model()
         alias = next((a for a, m in MODEL_ALIASES.items() if m == current), current)
-        await update.message.reply_text(f"Current model: {alias} ({current})\nUsage: /model opus|sonnet|haiku")
+        await update.message.reply_text(f"Current model: {alias} ({current})\nUsage: /model opus|opus47|sonnet|haiku")
         return
     try:
         resolved = set_model(args[0])
@@ -297,11 +297,27 @@ async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def kill_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Immediately abort any in-flight Claude task, drain the queue, and kill all subagents."""
+    """Immediately abort any in-flight Claude task, drain the queue, and kill all subagents.
+    Runs with block=False and uses executor to bypass event loop blocking.
+    """
     if not is_allowed(update.effective_user.id):
         return
     import signal
     import subprocess as sp
+
+    # Send ack immediately — don't wait
+    asyncio.create_task(update.message.reply_text("🔴 Killing..."))
+
+    # 0. Run the kill in a thread so it's not blocked by the event loop
+    def _do_kill():
+        import subprocess as _sp
+        bot_pid = os.getpid()
+        _sp.run(
+            f'pgrep -f "claude" | grep -v {bot_pid} | xargs kill -9 2>/dev/null',
+            shell=True
+        )
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, _do_kill)
 
     # 1. Abort the active Claude subprocess and flag the result to be discarded
     abort_current_task()
@@ -1116,7 +1132,7 @@ def main():
     app.add_handler(CommandHandler("models", models_command))
     app.add_handler(CommandHandler("model", model_command))
     app.add_handler(CommandHandler("stop", stop_command))
-    app.add_handler(CommandHandler("kill", kill_command))
+    app.add_handler(CommandHandler("kill", kill_command, block=False))
     app.add_handler(CommandHandler("restart", restart_command))
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("new", new_command))
