@@ -333,13 +333,7 @@ async def kill_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             break
 
-    # 3. Kill all running subagents
-    agents_killed = 0
-    for agent in list(list_subagents()):
-        if kill_subagent(agent["id"]):
-            agents_killed += 1
-
-    # 4. Fallback: broad pgrep kill for any lingering Claude processes
+    # 3. Fallback: broad pgrep kill for any lingering Claude processes (NOT subagents)
     bot_pid = os.getpid()
     sp.run(
         f'pgrep -f "claude --print" | grep -v {bot_pid} | xargs kill -9 2>/dev/null',
@@ -349,8 +343,6 @@ async def kill_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = ["✅ Killed. Bot is ready."]
     if drained:
         parts.append(f"{drained} queued task(s) discarded.")
-    if agents_killed:
-        parts.append(f"{agents_killed} subagent(s) stopped.")
     await update.message.reply_text(" ".join(parts))
 
 
