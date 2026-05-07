@@ -35,6 +35,7 @@ _current_model = CLAUDE_MODEL
 
 MODEL_ALIASES = {
     "opus":   "claude-opus-4-6",
+    "opus47": "claude-opus-4-7",
     "sonnet": "claude-sonnet-4-6",
     "haiku":  "claude-haiku-4-5-20251001",
 }
@@ -46,7 +47,7 @@ def set_model(alias_or_id: str) -> str:
     resolved = MODEL_ALIASES.get(alias_or_id.lower(), alias_or_id)
     valid = set(MODEL_ALIASES.values())
     if resolved not in valid:
-        raise ValueError(f"Unknown model: {alias_or_id!r}. Use: opus, sonnet, haiku")
+        raise ValueError(f"Unknown model: {alias_or_id!r}. Use: opus, opus47, sonnet, haiku")
     _current_model = resolved
     return resolved
 
