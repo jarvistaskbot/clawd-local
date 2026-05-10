@@ -3,6 +3,7 @@ import json
 import logging
 import subprocess
 import threading
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,22 @@ def escape_backticks(text: str) -> str:
     return text.replace("```", "\\`\\`\\`")
 
 
+YEREVAN_TZ = timezone(timedelta(hours=4))
+
+
+def _format_yerevan_ts(iso_utc) -> str:
+    if not iso_utc:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso_utc)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local = dt.astimezone(YEREVAN_TZ)
+        return local.strftime("%Y-%m-%d %H:%M GMT+4")
+    except Exception:
+        return ""
+
+
 def format_prompt(history: list[dict], current_message: str) -> str:
     parts = []
 
@@ -87,10 +104,13 @@ def format_prompt(history: list[dict], current_message: str) -> str:
         parts.append("[Previous conversation in this session:]")
         for msg in history:
             label = "Human" if msg["role"] == "user" else "Assistant"
-            parts.append(f"{label}: {escape_backticks(msg['content'])}")
+            ts = _format_yerevan_ts(msg.get("timestamp"))
+            prefix = f"[{ts}] " if ts else ""
+            parts.append(f"{prefix}{label}: {escape_backticks(msg['content'])}")
         parts.append("")
+    now_ts = datetime.now(YEREVAN_TZ).strftime("%Y-%m-%d %H:%M GMT+4")
     parts.append("[Current message:]")
-    parts.append(f"Human: {escape_backticks(current_message)}")
+    parts.append(f"[{now_ts}] Human: {escape_backticks(current_message)}")
     return "\n".join(parts)
 
 
