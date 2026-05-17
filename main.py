@@ -58,7 +58,7 @@ from queue_manager import queue_manager, QueueFullError
 from watchdog import run_watchdog, check_claude_health, is_healthy, setup_log_rotation
 from media_handler import (
     download_telegram_file, process_image, transcribe_audio,
-    extract_video_frame, cleanup_temp_file, is_text_file, is_image_file,
+    extract_video_frame, process_video, cleanup_temp_file, is_text_file, is_image_file,
     read_text_file,
 )
 
@@ -139,7 +139,16 @@ async def _send_file_if_requested(context, chat_id: int, file_to_send: str):
 
 
 async def _subagent_notify(user_id: int, agent_id: str, result: str, success: bool):
-    """Called when a subagent finishes — sends result to Telegram."""
+    """Called when a subagent finishes — sends result to Telegram and saves to session history."""
+    status = "completed" if success else "failed"
+    history_entry = f"[Subagent {agent_id} {status}]\n{result}"
+    try:
+        project_name = get_active_project(user_id)
+        session_id = get_or_create_project_chat_session(user_id, project_name)
+        add_message(session_id, "assistant", history_entry)
+    except Exception as e:
+        logger.error("Failed to save subagent result to history: %s", e)
+
     if not bot_instance:
         logger.error("Cannot notify subagent result: bot_instance not set")
         return
@@ -216,7 +225,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     history = get_history(session_id)
     cli_status = _check_claude_cli()
     last = _last_activity or "no activity yet"
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         "clawd-local status\n\n"
         f"Bot running: OK\n"
         f"Claude CLI: {cli_status}\n"
@@ -242,7 +251,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         "Available commands:\n\n"
         "/start - Bot status and diagnostics\n"
         "/session <name> - Switch to project session\n"
@@ -276,7 +285,7 @@ async def models_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for alias, model_id in MODEL_ALIASES.items():
         marker = " ✅ (current)" if model_id == current else ""
         lines.append(f"  /model {alias} — {model_id}{marker}")
-    await update.message.reply_text("\n".join(lines))
+    await update.effective_message.reply_text("\n".join(lines))
 
 
 async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -286,14 +295,14 @@ async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         current = get_model()
         alias = next((a for a, m in MODEL_ALIASES.items() if m == current), current)
-        await update.message.reply_text(f"Current model: {alias} ({current})\nUsage: /model opus|opus47|sonnet|haiku")
+        await update.effective_message.reply_text(f"Current model: {alias} ({current})\nUsage: /model opus|opus47|sonnet|haiku")
         return
     try:
         resolved = set_model(args[0])
         alias = args[0].lower()
-        await update.message.reply_text(f"Model set to: {alias} ({resolved})")
+        await update.effective_message.reply_text(f"Model set to: {alias} ({resolved})")
     except ValueError as e:
-        await update.message.reply_text(str(e))
+        await update.effective_message.reply_text(str(e))
 
 
 async def kill_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -306,7 +315,7 @@ async def kill_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import subprocess as sp
 
     # Send ack immediately — don't wait
-    asyncio.create_task(update.message.reply_text("🔴 Killing..."))
+    asyncio.create_task(update.effective_message.reply_text("🔴 Killing..."))
 
     # 0. Run the kill in a thread so it's not blocked by the event loop
     def _do_kill():
@@ -343,13 +352,13 @@ async def kill_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = ["✅ Killed. Bot is ready."]
     if drained:
         parts.append(f"{drained} queued task(s) discarded.")
-    await update.message.reply_text(" ".join(parts))
+    await update.effective_message.reply_text(" ".join(parts))
 
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
-    await update.message.reply_text("Shutting down...")
+    await update.effective_message.reply_text("Shutting down...")
     logger.info("Stop command received. Exiting.")
     os._exit(0)
 
@@ -357,7 +366,7 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def restart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
-    await update.message.reply_text("Restarting...")
+    await update.effective_message.reply_text("Restarting...")
     logger.info("Restart command received. Re-executing process.")
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
@@ -368,7 +377,7 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     project_name = get_active_project(user_id)
     reset_project_session(user_id, project_name)
-    await update.message.reply_text(f"Conversation reset for project '{project_name}'. Starting fresh!")
+    await update.effective_message.reply_text(f"Conversation reset for project '{project_name}'. Starting fresh!")
 
 
 async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -377,7 +386,7 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     project_name = get_active_project(user_id)
     reset_project_session(user_id, project_name)
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         f"🆕 New session started for project '{project_name}'. Previous history preserved but not active."
     )
 
@@ -391,12 +400,12 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             count = int(context.args[0])
         except ValueError:
-            await update.message.reply_text("Usage: /clear [N] — N must be a number.")
+            await update.effective_message.reply_text("Usage: /clear [N] — N must be a number.")
             return
     project_name = get_active_project(user_id)
     session_id = get_or_create_project_chat_session(user_id, project_name)
     deleted = clear_last_messages(session_id, count)
-    await update.message.reply_text(f"🗑 Cleared last {deleted} messages from project '{project_name}'.")
+    await update.effective_message.reply_text(f"🗑 Cleared last {deleted} messages from project '{project_name}'.")
 
 
 async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -409,10 +418,10 @@ async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     messages = get_history(session_id, limit=50)
 
     if len(messages) < 4:
-        await update.message.reply_text("Not enough history to compact (need at least 4 messages).")
+        await update.effective_message.reply_text("Not enough history to compact (need at least 4 messages).")
         return
 
-    await update.message.reply_text(f"🗜 Compacting {len(messages)} messages...")
+    await update.effective_message.reply_text(f"🗜 Compacting {len(messages)} messages...")
 
     # Build conversation text for summarization
     conv_text = "\n".join(
@@ -437,12 +446,12 @@ async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         add_message(session_id, "assistant",
             f"[COMPACTED CONTEXT — {len(messages)} messages summarized]\n\n{summary}")
 
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             f"✅ Compacted {len(messages)} messages into summary.\n\n"
             f"**Summary:**\n{summary[:2000]}"
         )
     except Exception as e:
-        await update.message.reply_text(f"Compact failed: {e}")
+        await update.effective_message.reply_text(f"Compact failed: {e}")
 
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -453,7 +462,7 @@ async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session_id = get_or_create_project_chat_session(user_id, project_name)
     messages = get_history(session_id, limit=10)
     if not messages:
-        await update.message.reply_text(f"No messages in project '{project_name}' yet.")
+        await update.effective_message.reply_text(f"No messages in project '{project_name}' yet.")
         return
     lines = [f"📁 Project: {project_name}\n"]
     for msg in messages:
@@ -462,7 +471,7 @@ async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(msg["content"]) > 200:
             content += "..."
         lines.append(f"**{prefix}:** {content}")
-    await update.message.reply_text("\n\n".join(lines))
+    await update.effective_message.reply_text("\n\n".join(lines))
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -474,7 +483,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     messages = get_history(session_id, limit=9999)
     claude_sid = get_project_claude_session_id(user_id, project_name)
     s = get_stats(user_id)
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         f"📁 Project: {project_name}\n"
         f"Messages in project: {len(messages)}\n"
         f"Claude session: {'active' if claude_sid else 'none'}\n\n"
@@ -498,7 +507,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         minutes = remainder // 60
         uptime_str = f"{hours}h {minutes}m"
 
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         "System Status\n\n"
         f"Bot: ✅ Running\n"
         f"Claude CLI: {claude_status}\n"
@@ -533,7 +542,7 @@ async def _run_with_progress(update, context, coro):
                 label = f"{elapsed_int // 60}min" if elapsed_int >= 120 else f"{elapsed_int}s"
                 try:
                     if progress_msg is None:
-                        progress_msg = await update.message.reply_text(f"⏳ Still working... ({label})")
+                        progress_msg = await update.effective_message.reply_text(f"⏳ Still working... ({label})")
                     else:
                         await progress_msg.edit_text(f"⏳ Still working... ({label})")
                 except Exception:
@@ -564,7 +573,7 @@ async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = context.args
     if not args:
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             "Usage: /upload <file_path>\n\n"
             "Place files in ~/clawd-local/ for easy access:\n"
             "Example: /upload ~/clawd-local/report.txt\n"
@@ -575,17 +584,17 @@ async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_path = os.path.expanduser(" ".join(args))
 
     if not os.path.exists(file_path):
-        await update.message.reply_text(f"File not found: {file_path}")
+        await update.effective_message.reply_text(f"File not found: {file_path}")
         return
 
     file_size = os.path.getsize(file_path)
     if file_size > 50 * 1024 * 1024:  # 50MB Telegram limit
-        await update.message.reply_text(f"File too large ({file_size // 1024 // 1024}MB). Telegram limit is 50MB.")
+        await update.effective_message.reply_text(f"File too large ({file_size // 1024 // 1024}MB). Telegram limit is 50MB.")
         return
 
     # Check read permission before attempting upload
     if not os.access(file_path, os.R_OK):
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             f"⚠️ Permission denied: cannot read `{file_path}`\n\n"
             f"The bot runs as `openclaw` user. If the file is on Desktop or in a restricted folder, "
             f"copy it first:\n`cp {file_path} ~/clawd-local/`\n"
@@ -594,7 +603,7 @@ async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        await update.message.reply_text(f"📤 Uploading {os.path.basename(file_path)}...")
+        await update.effective_message.reply_text(f"📤 Uploading {os.path.basename(file_path)}...")
         with open(file_path, "rb") as f:
             await context.bot.send_document(
                 chat_id=update.effective_chat.id,
@@ -603,12 +612,12 @@ async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption=f"{os.path.basename(file_path)} ({file_size // 1024}KB)",
             )
     except PermissionError:
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             f"⚠️ Permission denied: `{file_path}`\n"
             f"Copy to `~/clawd-local/` first, then upload from there."
         )
     except Exception as e:
-        await update.message.reply_text(f"Upload failed: {e}")
+        await update.effective_message.reply_text(f"Upload failed: {e}")
 
 
 PROJECT_KEYWORDS = {
@@ -689,7 +698,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         pending = queue_manager.pending_count
         if pending > 0:
-            await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
+            await update.effective_message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
         result = await _run_with_progress(
             update, context,
@@ -707,10 +716,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
         await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
-        await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
+        await update.effective_message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
         logger.exception("Error handling message")
-        await update.message.reply_text(f"Something went wrong: {e}")
+        await update.effective_message.reply_text(f"Something went wrong: {e}")
 
 
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -727,7 +736,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         pending = queue_manager.pending_count
         if pending > 0:
-            await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
+            await update.effective_message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
         result = await _run_with_progress(
             update, context,
@@ -740,10 +749,10 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
         await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
-        await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
+        await update.effective_message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
         logger.exception("Error handling photo")
-        await update.message.reply_text(f"Something went wrong: {e}")
+        await update.effective_message.reply_text(f"Something went wrong: {e}")
     finally:
         if local_path:
             cleanup_temp_file(local_path)
@@ -760,11 +769,11 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         voice = update.message.voice or update.message.audio
         local_path = await download_telegram_file(context.bot, voice.file_id, suffix=".ogg")
         transcription = await transcribe_audio(local_path)
-        await update.message.reply_text(f"🎤 Transcribed: {transcription}")
+        await update.effective_message.reply_text(f"🎤 Transcribed: {transcription}")
 
         pending = queue_manager.pending_count
         if pending > 0:
-            await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
+            await update.effective_message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
         result = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, transcription, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -774,10 +783,10 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
         await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
-        await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
+        await update.effective_message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
         logger.exception("Error handling voice message")
-        await update.message.reply_text(f"Something went wrong: {e}")
+        await update.effective_message.reply_text(f"Something went wrong: {e}")
     finally:
         if local_path:
             cleanup_temp_file(local_path)
@@ -789,26 +798,22 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_id = update.effective_user.id
     local_path = None
-    frame_path = None
     try:
-        
         video = update.message.video or update.message.video_note
         local_path = await download_telegram_file(context.bot, video.file_id, suffix=".mp4")
-        frame_path = await extract_video_frame(local_path)
 
-        if frame_path is None:
-            await update.message.reply_text(
-                "Video received but ffmpeg not installed for frame extraction. "
-                "Please send a screenshot instead."
+        caption = update.message.caption or ""
+        prompt = await process_video(local_path, caption)
+
+        if prompt.startswith("User sent a video but frame extraction failed"):
+            await update.effective_message.reply_text(
+                "Video received but ffmpeg not installed/working. Please send a screenshot instead."
             )
             return
 
-        caption = update.message.caption or ""
-        prompt = await process_image(frame_path, caption)
-
         pending = queue_manager.pending_count
         if pending > 0:
-            await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
+            await update.effective_message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
         result = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -818,15 +823,13 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
         await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
-        await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
+        await update.effective_message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
         logger.exception("Error handling video")
-        await update.message.reply_text(f"Something went wrong: {e}")
+        await update.effective_message.reply_text(f"Something went wrong: {e}")
     finally:
         if local_path:
             cleanup_temp_file(local_path)
-        if frame_path:
-            cleanup_temp_file(frame_path)
 
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -848,12 +851,12 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             local_path = await download_telegram_file(context.bot, doc.file_id, suffix=os.path.splitext(filename)[1])
             prompt = await read_text_file(local_path, filename)
         else:
-            await update.message.reply_text(f"Document type not supported: {filename}")
+            await update.effective_message.reply_text(f"Document type not supported: {filename}")
             return
 
         pending = queue_manager.pending_count
         if pending > 0:
-            await update.message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
+            await update.effective_message.reply_text(f"⏳ Queued... ({pending} ahead of you)")
 
         result = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -863,10 +866,10 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
         await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
-        await update.message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
+        await update.effective_message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:
         logger.exception("Error handling document")
-        await update.message.reply_text(f"Something went wrong: {e}")
+        await update.effective_message.reply_text(f"Something went wrong: {e}")
     finally:
         if local_path:
             cleanup_temp_file(local_path)
@@ -881,19 +884,19 @@ async def agents_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if args and args[0] == "kill" and len(args) >= 2:
         agent_id = args[1]
         if kill_subagent(agent_id):
-            await update.message.reply_text(f"Killed subagent {agent_id}")
+            await update.effective_message.reply_text(f"Killed subagent {agent_id}")
         else:
-            await update.message.reply_text(f"Subagent {agent_id} not found or not running")
+            await update.effective_message.reply_text(f"Subagent {agent_id} not found or not running")
         return
 
     if args and args[0] == "clean":
         cleanup_done_subagents()
-        await update.message.reply_text("Cleaned up finished subagents.")
+        await update.effective_message.reply_text("Cleaned up finished subagents.")
         return
 
     agents = list_subagents()
     if not agents:
-        await update.message.reply_text("No subagents running.")
+        await update.effective_message.reply_text("No subagents running.")
         return
 
     lines = ["🤖 Subagents:\n"]
@@ -904,7 +907,7 @@ async def agents_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  {a['id']} [{a['status']}] {mins}m — {a['task']}"
         )
     lines.append("\nUse /agents kill <id> to stop one.")
-    await update.message.reply_text("\n".join(lines))
+    await update.effective_message.reply_text("\n".join(lines))
 
 
 async def thread_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -921,20 +924,20 @@ async def thread_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args or args[0] == "list":
         mappings = list_thread_projects(chat_id)
         if not mappings:
-            await update.message.reply_text("No thread→project mappings set.\n\nUse: /thread set <project>")
+            await update.effective_message.reply_text("No thread→project mappings set.\n\nUse: /thread set <project>")
             return
         lines = ["Thread→Project mappings:\n"]
         for m in mappings:
             lines.append(f"  Thread {m['thread_id']} → {m['project_name']}")
-        await update.message.reply_text("\n".join(lines))
+        await update.effective_message.reply_text("\n".join(lines))
         return
 
     if args[0] == "set":
         if len(args) < 2:
-            await update.message.reply_text("Usage: /thread set <project_name>")
+            await update.effective_message.reply_text("Usage: /thread set <project_name>")
             return
         if thread_id is None:
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 "This message is not in a forum thread.\n"
                 "Thread routing works in Telegram supergroups with Topics enabled."
             )
@@ -945,7 +948,7 @@ async def thread_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         set_active_project(user_id, project_name)
         get_or_create_project_session(user_id, project_name)
         get_or_create_project_chat_session(user_id, project_name)
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             f"Thread {thread_id} → project '{project_name}'\n"
             f"Messages in this thread will use the '{project_name}' project session."
         )
@@ -953,17 +956,17 @@ async def thread_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if args[0] == "clear":
         if thread_id is None:
-            await update.message.reply_text("No thread detected in this message.")
+            await update.effective_message.reply_text("No thread detected in this message.")
             return
         from memory import _connect as _mem_connect
         conn = _mem_connect()
         conn.execute("DELETE FROM thread_projects WHERE chat_id = ? AND thread_id = ?", (chat_id, thread_id))
         conn.commit()
         conn.close()
-        await update.message.reply_text(f"Cleared mapping for thread {thread_id}.")
+        await update.effective_message.reply_text(f"Cleared mapping for thread {thread_id}.")
         return
 
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         "Usage:\n"
         "/thread set <project> — tag this thread to a project\n"
         "/thread list — list all mappings\n"
@@ -976,12 +979,12 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
     if not context.args:
-        await update.message.reply_text("Usage: /search <keyword>")
+        await update.effective_message.reply_text("Usage: /search <keyword>")
         return
     query = " ".join(context.args)
     results = search_telegram_log(query, limit=10)
     if not results:
-        await update.message.reply_text(f"No messages found matching: {query}")
+        await update.effective_message.reply_text(f"No messages found matching: {query}")
         return
     lines = [f"Search results for '{query}':\n"]
     for r in results:
@@ -991,7 +994,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         snippet = r["content"][:200]
         thread_info = f" [thread {r['thread_id']}]" if r["thread_id"] else ""
         lines.append(f"{direction} [{ts}]{thread_info} {sender}: {snippet}")
-    await update.message.reply_text("\n\n".join(lines))
+    await update.effective_message.reply_text("\n\n".join(lines))
 
 
 async def session_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1007,7 +1010,7 @@ async def session_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session_id = get_or_create_project_chat_session(user_id, project_name)
         messages = get_history(session_id, limit=9999)
         claude_sid = get_project_claude_session_id(user_id, project_name)
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             f"📁 Active project: {project_name}\n"
             f"💬 {len(messages)} messages\n"
             f"🤖 Claude session: {'active' if claude_sid else 'none'}\n\n"
@@ -1020,17 +1023,17 @@ async def session_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if args[0].lower() == "delete":
         if len(args) < 2:
-            await update.message.reply_text("Usage: /session delete <name>")
+            await update.effective_message.reply_text("Usage: /session delete <name>")
             return
         target = args[1].lower()
         active = get_active_project(user_id)
         if target == active:
-            await update.message.reply_text("Cannot delete the active project. Switch to another first.")
+            await update.effective_message.reply_text("Cannot delete the active project. Switch to another first.")
             return
         if delete_project_session(user_id, target):
-            await update.message.reply_text(f"🗑 Deleted project: {target}")
+            await update.effective_message.reply_text(f"🗑 Deleted project: {target}")
         else:
-            await update.message.reply_text(f"Project '{target}' not found.")
+            await update.effective_message.reply_text(f"Project '{target}' not found.")
         return
 
     # Switch to (or create) project
@@ -1040,7 +1043,7 @@ async def session_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session_id = get_or_create_project_chat_session(user_id, project_name)
     messages = get_history(session_id, limit=9999)
     claude_sid = ps.get("claude_session_id")
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         f"📁 Switched to project: {project_name}\n"
         f"💬 {len(messages)} messages in this session\n"
         f"🤖 Claude session: {'active' if claude_sid else 'new'}"
@@ -1055,7 +1058,7 @@ async def sessions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sessions = list_project_sessions(user_id)
     if not sessions:
         project_name = get_active_project(user_id)
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             f"📁 Active project: {project_name} (no other sessions)\n\n"
             "Use /session <name> to create a new project."
         )
@@ -1068,7 +1071,7 @@ async def sessions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         last = s["last_used_at"][:16] if s["last_used_at"] else "never"
         lines.append(f"• {s['name']}{marker} — {s['message_count']} msgs, last: {last} {claude}")
     lines.append("\nUse /session <name> to switch.")
-    await update.message.reply_text("\n".join(lines))
+    await update.effective_message.reply_text("\n".join(lines))
 
 
 async def context_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1092,7 +1095,7 @@ async def context_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         + f"\n📦 Total context size: {size_kb:.1f} KB"
         + "\n\nContext is injected into every Claude prompt automatically."
     )
-    await update.message.reply_text(msg)
+    await update.effective_message.reply_text(msg)
 
 
 async def _send_telegram_alert(text: str):
