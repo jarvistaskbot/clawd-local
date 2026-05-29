@@ -157,6 +157,139 @@ async def extract_video_frame(video_path: str) -> Optional[str]:
         return None
 
 
+async def _get_video_duration(video_path: str) -> Optional[float]:
+    """Return video duration in seconds using ffprobe, or None on failure."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", video_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        if proc.returncode == 0:
+            return float(stdout.decode().strip())
+    except Exception as e:
+        logger.warning("ffprobe duration failed: %s", e)
+    return None
+
+
+async def extract_video_frames(video_path: str, count: int = 4) -> list[str]:
+    """Extract `count` evenly-spaced frames from a video. Returns list of frame paths."""
+    duration = await _get_video_duration(video_path)
+    if duration is None or duration <= 0:
+        single = await extract_video_frame(video_path)
+        return [single] if single else []
+
+    temp_dir = get_media_temp_dir()
+    frames: list[str] = []
+    # Sample at midpoints of `count` equal segments to avoid edge frames
+    timestamps = [duration * (i + 0.5) / count for i in range(count)]
+    for ts in timestamps:
+        frame_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}_frame.jpg")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-ss", f"{ts:.2f}", "-i", video_path,
+                "-vframes", "1", "-q:v", "3", "-f", "image2", frame_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(proc.wait(), timeout=30)
+            if proc.returncode == 0 and os.path.exists(frame_path):
+                frames.append(frame_path)
+        except Exception as e:
+            logger.warning("Frame extraction at %.2fs failed: %s", ts, e)
+    return frames
+
+
+async def extract_audio_from_video(video_path: str) -> Optional[str]:
+    """Extract audio from a video as 16kHz mono WAV for Whisper. Returns path or None."""
+    temp_dir = get_media_temp_dir()
+    audio_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}_audio.wav")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-i", video_path, "-vn", "-ar", "16000", "-ac", "1",
+            "-f", "wav", audio_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=60)
+        if proc.returncode == 0 and os.path.exists(audio_path) and os.path.getsize(audio_path) > 1024:
+            return audio_path
+        if os.path.exists(audio_path):
+            cleanup_temp_file(audio_path)
+        return None
+    except Exception as e:
+        logger.warning("Audio extraction failed: %s", e)
+        return None
+
+
+async def process_video(video_path: str, caption: str = "", frame_count: int = None) -> str:
+    """Analyze a video by extracting multiple frames + audio transcript.
+    Sends all frames in a single gpt-4o call so the model can reason about motion.
+    frame_count=None means adaptive: 1 frame per 2s, capped at 4–12.
+    """
+    import base64
+    caption_part = f"\nUser caption: {caption}" if caption else ""
+
+    if not OPENAI_API_KEY:
+        return f"User sent a video (OpenAI key not set for vision analysis).{caption_part}"
+
+    if frame_count is None:
+        duration = await _get_video_duration(video_path)
+        if duration and duration > 0:
+            frame_count = max(4, min(12, int(duration / 2)))
+        else:
+            frame_count = 4
+
+    frames = await extract_video_frames(video_path, count=frame_count)
+    if not frames:
+        return f"User sent a video but frame extraction failed (ffmpeg missing or video unreadable).{caption_part}"
+
+    audio_path = await extract_audio_from_video(video_path)
+    transcript = ""
+    if audio_path:
+        try:
+            transcript = await transcribe_audio(audio_path)
+        finally:
+            cleanup_temp_file(audio_path)
+
+    try:
+        coverage_note = f"at ~1 frame per 2 seconds" if frame_count >= 4 else ""
+        content = [{
+            "type": "text",
+            "text": (
+                f"These are {len(frames)} evenly-spaced frames from a video {coverage_note}, in chronological order. "
+                f"Describe what's happening in the video — consider motion, changes between frames, and what the video appears to show overall."
+                f"{caption_part}"
+            ),
+        }]
+        for fp in frames:
+            with open(fp, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+
+        client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": content}],
+            max_tokens=800,
+        )
+        description = response.choices[0].message.content
+        parts = [f"[Video analyzed by vision AI — {len(frames)} frames]", description]
+        if transcript and not transcript.startswith("Could not transcribe"):
+            parts.append(f"\nAudio transcript:\n{transcript}")
+        if caption:
+            parts.append(f"\nUser caption: {caption}")
+        return "\n".join(parts)
+    except Exception as e:
+        logger.exception("Video analysis failed")
+        return f"User sent a video (analysis failed: {e}).{caption_part}"
+    finally:
+        for fp in frames:
+            cleanup_temp_file(fp)
+
+
 def is_text_file(filename: str) -> bool:
     _, ext = os.path.splitext(filename.lower())
     return ext in TEXT_EXTENSIONS

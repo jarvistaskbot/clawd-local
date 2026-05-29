@@ -38,8 +38,8 @@ async def spawn_subagent(user_id: int, task: str, notify_callback) -> str:
 
     from config import CLAUDE_CLI_PATH, CLAUDE_MODEL, WORKSPACE_DIR
     from context import get_context
-    system_context = get_context()
-    full_prompt = f"{system_context}\n\n[Background task requested by user:]\n{task}" if system_context else task
+    system_context = get_context(for_subagent=True)
+    full_prompt = f"{system_context}\n\n[TASK TO COMPLETE — do the work yourself and print the result]\n{task}" if system_context else task
     cmd = [
         CLAUDE_CLI_PATH,
         "--print",

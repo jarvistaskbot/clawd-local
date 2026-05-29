@@ -41,8 +41,13 @@ def _load_recent_daily_notes(days: int = 3) -> str:
     return "\n\n".join(parts)
 
 
-def build_system_context() -> str:
-    """Build the full system context string to prepend to every Claude prompt."""
+def build_system_context(for_subagent: bool = False) -> str:
+    """Build the full system context string to prepend to every Claude prompt.
+
+    for_subagent=True strips the main-bot protocol (SPAWN_AGENT, SEND_FILE) and
+    replaces it with subagent role instructions, so the subagent actually does
+    the work instead of recursively emitting [SPAWN_AGENT: ...].
+    """
     sections = []
 
     # Core identity and user profile (cap MEMORY.md to avoid huge context)
@@ -63,29 +68,42 @@ def build_system_context() -> str:
         return ""
 
     today = datetime.now().strftime("%Y-%m-%d %H:%M")
-    header = (
-        f"[SYSTEM CONTEXT — loaded from OpenClaw workspace at {today}]\n"
-        "You are Arto's AI assistant. The following is your persistent memory and context.\n"
-        "Use it to answer questions about past work, decisions, and ongoing projects.\n"
-        "To send a file to the user, include [SEND_FILE: /absolute/path/to/file] anywhere in your response.\n"
-        "BACKGROUND TASKS: If the user asks you to do something 'in the background', 'as a background task', or 'don't block', you MUST respond with ONLY [SPAWN_AGENT: <full detailed task description>] and nothing else — do NOT attempt the task yourself inline. The subagent runs as a separate process and reports back to Telegram when done.\n"
-        "For other heavy tasks (code audit, file generation, long analysis) you judge should run async, also use [SPAWN_AGENT: detailed task description].\n"
-        "To send a file to the user, include [SEND_FILE: /absolute/path/to/file] anywhere in your response.\n"
-        "---\n"
-    )
+    if for_subagent:
+        header = (
+            f"[SYSTEM CONTEXT — loaded from OpenClaw workspace at {today}]\n"
+            "You are a background subagent for Arto. The persistent memory below is for context only.\n"
+            "Your job: complete the task described at the bottom of this prompt and print the result as plain text. Your stdout is captured and forwarded to Arto on Telegram.\n"
+            "DO NOT emit [SPAWN_AGENT: ...] — you ARE the subagent; spawning another would recurse.\n"
+            "DO NOT emit [SEND_FILE: ...] — you cannot send files; describe paths inline instead.\n"
+            "Do the work directly using whatever tools you have, then report the result.\n"
+            "---\n"
+        )
+    else:
+        header = (
+            f"[SYSTEM CONTEXT — loaded from OpenClaw workspace at {today}]\n"
+            "You are Arto's AI assistant. The following is your persistent memory and context.\n"
+            "Use it to answer questions about past work, decisions, and ongoing projects.\n"
+            "To send a file to the user, include [SEND_FILE: /absolute/path/to/file] anywhere in your response.\n"
+            "BACKGROUND TASKS: If the user asks you to do something 'in the background', 'as a background task', or 'don't block', you MUST respond with ONLY [SPAWN_AGENT: <full detailed task description>] and nothing else — do NOT attempt the task yourself inline. The subagent runs as a separate process and reports back to Telegram when done.\n"
+            "For other heavy tasks (code audit, file generation, long analysis) you judge should run async, also use [SPAWN_AGENT: detailed task description].\n"
+            "To send a file to the user, include [SEND_FILE: /absolute/path/to/file] anywhere in your response.\n"
+            "---\n"
+        )
     return header + "\n\n".join(sections) + "\n\n[END SYSTEM CONTEXT]\n"
 
 
-# Cache context for 5 minutes to avoid re-reading files on every message
-_cache: dict = {"context": None, "loaded_at": 0}
+# Cache contexts for 5 minutes to avoid re-reading files on every message
+_cache: dict = {"main": None, "subagent": None, "loaded_at": 0}
 CACHE_TTL = 300  # seconds
 
 
-def get_context() -> str:
+def get_context(for_subagent: bool = False) -> str:
     """Return cached context, refreshing every 5 minutes."""
     import time
     now = time.time()
-    if _cache["context"] is None or (now - _cache["loaded_at"]) > CACHE_TTL:
-        _cache["context"] = build_system_context()
+    key = "subagent" if for_subagent else "main"
+    if _cache[key] is None or (now - _cache["loaded_at"]) > CACHE_TTL:
+        _cache["main"] = build_system_context(for_subagent=False)
+        _cache["subagent"] = build_system_context(for_subagent=True)
         _cache["loaded_at"] = now
-    return _cache["context"]
+    return _cache[key]

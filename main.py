@@ -24,7 +24,7 @@ from memory import (
     log_telegram_message, search_telegram_log,
     get_thread_project, set_thread_project, list_thread_projects,
 )
-from agent import handle_message, abort_current_task, set_model, get_model, MODEL_ALIASES
+from agent import handle_message, abort_current_task, set_model, get_model, MODEL_ALIASES, _task_aborted
 from subagent import spawn_subagent, list_subagents, kill_subagent, cleanup_done_subagents
 
 async def handle_message_direct(user_id: int, message: str) -> dict:
@@ -706,13 +706,22 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        if _task_aborted.is_set():
+            _task_aborted.clear()
+            return
         response_text, file_to_send, spawn_task = _unpack_result(result)
         for chunk in split_message(response_text):
+            if _task_aborted.is_set():
+                _task_aborted.clear()
+                return
             await safe_reply_in_thread(update.message, chunk, thread_id)
             log_telegram_message(
                 chat_id=chat_id, direction="out", content=chunk,
                 thread_id=thread_id, sender_name="bot",
             )
+        if _task_aborted.is_set():
+            _task_aborted.clear()
+            return
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
         await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
@@ -743,9 +752,18 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct)
         )
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        if _task_aborted.is_set():
+            _task_aborted.clear()
+            return
         response_text, file_to_send, spawn_task = _unpack_result(result)
         for chunk in split_message(response_text):
+            if _task_aborted.is_set():
+                _task_aborted.clear()
+                return
             await safe_reply(update.message, chunk)
+        if _task_aborted.is_set():
+            _task_aborted.clear()
+            return
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
         await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
@@ -777,9 +795,18 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         result = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, transcription, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        if _task_aborted.is_set():
+            _task_aborted.clear()
+            return
         response_text, file_to_send, spawn_task = _unpack_result(result)
         for chunk in split_message(response_text):
+            if _task_aborted.is_set():
+                _task_aborted.clear()
+                return
             await safe_reply(update.message, chunk)
+        if _task_aborted.is_set():
+            _task_aborted.clear()
+            return
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
         await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
@@ -817,9 +844,18 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         result = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        if _task_aborted.is_set():
+            _task_aborted.clear()
+            return
         response_text, file_to_send, spawn_task = _unpack_result(result)
         for chunk in split_message(response_text):
+            if _task_aborted.is_set():
+                _task_aborted.clear()
+                return
             await safe_reply(update.message, chunk)
+        if _task_aborted.is_set():
+            _task_aborted.clear()
+            return
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
         await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:
@@ -860,9 +896,18 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         result = await _run_with_progress(update, context, queue_manager.enqueue_prompt(user_id, prompt, handle_message_direct))
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        if _task_aborted.is_set():
+            _task_aborted.clear()
+            return
         response_text, file_to_send, spawn_task = _unpack_result(result)
         for chunk in split_message(response_text):
+            if _task_aborted.is_set():
+                _task_aborted.clear()
+                return
             await safe_reply(update.message, chunk)
+        if _task_aborted.is_set():
+            _task_aborted.clear()
+            return
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
         await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
     except QueueFullError:

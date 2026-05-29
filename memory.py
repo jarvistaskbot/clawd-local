@@ -106,11 +106,11 @@ def add_message(session_id: int, role: str, content: str):
 def get_history(session_id: int, limit: int = 20) -> list[dict]:
     conn = _connect()
     rows = conn.execute(
-        "SELECT role, content FROM messages WHERE session_id = ? AND role != 'system' ORDER BY id DESC LIMIT ?",
+        "SELECT role, content, timestamp FROM messages WHERE session_id = ? AND role != 'system' ORDER BY id DESC LIMIT ?",
         (session_id, limit),
     ).fetchall()
     conn.close()
-    return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+    return [{"role": r["role"], "content": r["content"], "timestamp": r["timestamp"]} for r in reversed(rows)]
 
 
 def reset_session(user_id: int) -> int:

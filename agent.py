@@ -262,17 +262,25 @@ async def handle_message(user_id: int, message: str, skip_optimize: bool = False
     add_message(session_id, "user", message)
     add_message(session_id, "assistant", response)
 
-    # Check for file send marker in response
+    # Strip markdown code blocks before scanning for control markers,
+    # so example/explanation text inside ``` or ` does not trigger real actions.
     import re
+    def _strip_code_blocks(text: str) -> str:
+        # Remove fenced blocks (```...```), then inline backticks (`...`)
+        text = re.sub(r"```[\s\S]*?```", "", text)
+        text = re.sub(r"`[^`\n]*`", "", text)
+        return text
+
+    scan_text = _strip_code_blocks(response)
+
     file_to_send = None
-    file_match = re.search(r"\[SEND_FILE:\s*([^\]]+)\]", response)
+    file_match = re.search(r"\[SEND_FILE:\s*([^\]]+)\]", scan_text)
     if file_match:
         file_to_send = file_match.group(1).strip()
         response = re.sub(r"\[SEND_FILE:\s*[^\]]+\]", "", response).strip()
 
-    # Check for subagent spawn marker in response
     spawn_task = None
-    spawn_match = re.search(r"\[SPAWN_AGENT:\s*([^\]]+)\]", response)
+    spawn_match = re.search(r"\[SPAWN_AGENT:\s*([^\]]+)\]", scan_text)
     if spawn_match:
         spawn_task = spawn_match.group(1).strip()
         response = re.sub(r"\[SPAWN_AGENT:\s*[^\]]+\]", "", response).strip()
