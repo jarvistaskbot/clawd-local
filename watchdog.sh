@@ -11,9 +11,9 @@ log() {
 }
 
 restart_bot() {
-    log "ACTION: Killing all claude + python3 main.py processes"
+    log "ACTION: Killing all claude + bot processes"
     pkill -9 -f "claude" 2>/dev/null
-    pkill -9 -f "python3.*main.py" 2>/dev/null
+    pkill -9 -f "[Pp]ython.*main\.py" 2>/dev/null
     sleep 3
     launchctl unload "$HOME/Library/LaunchAgents/com.clawd.local.plist" 2>/dev/null
     sleep 2
@@ -21,9 +21,9 @@ restart_bot() {
     log "ACTION: Bot restarted"
 }
 
-# Check 1: Is python3 main.py running?
-if ! pgrep -f "python3.*main.py" > /dev/null 2>&1; then
-    log "DEAD: python3 main.py not running — restarting"
+# Check 1: Is the bot process running? (matches Python, python3, or Python3 running main.py)
+if ! pgrep -f "[Pp]ython.*main\.py" > /dev/null 2>&1; then
+    log "DEAD: bot process not running — restarting"
     restart_bot
     exit 0
 fi
