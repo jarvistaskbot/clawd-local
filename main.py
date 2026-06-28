@@ -1204,7 +1204,15 @@ def main():
     app.post_init = post_init
 
     logger.info("Bot started. Polling for messages...")
-    app.run_polling()
+    try:
+        app.run_polling(stop_signals=None)
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    except RuntimeError as e:
+        if "event loop" in str(e).lower():
+            pass  # Suppress harmless event loop closed error on shutdown
+        else:
+            raise
 
 
 if __name__ == "__main__":
