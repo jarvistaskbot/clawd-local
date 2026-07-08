@@ -59,7 +59,7 @@ from memory import (
     get_or_create_session, add_message, get_history,
     get_active_project, set_active_project, get_or_create_project_session,
     get_or_create_project_chat_session, get_project_claude_session_id,
-    update_project_claude_session,
+    update_project_claude_session, get_brainstorm_mode,
 )
 from context import get_context
 from optimizer import optimize_prompt
@@ -93,13 +93,39 @@ def _format_yerevan_ts(iso_utc) -> str:
         return ""
 
 
-def format_prompt(history: list[dict], current_message: str) -> str:
+BRAINSTORM_SKILL_PATH = "/Users/openclaw/clawd-local/skills/brainstorming/SKILL.md"
+
+
+def _brainstorm_directive(topic: str | None) -> str:
+    topic_line = f"Topic: {topic}\n" if topic else ""
+    return (
+        "[BRAINSTORM MODE ACTIVE]\n"
+        f"You are running the brainstorming skill. Read {BRAINSTORM_SKILL_PATH} now if you "
+        "have not already this session, and follow it exactly.\n"
+        f"{topic_line}"
+        "HARD GATE: do NOT write code, scaffold, or take any implementation action until you "
+        "have presented a design AND the user has explicitly approved it. Ask ONE clarifying "
+        "question per message (multiple-choice preferred), number them (Q1 of ~N), explore "
+        "context first, then propose 2-3 approaches with a recommendation, then present the "
+        "design in sections for approval. This mode stays on until the user sends "
+        "'/brainstorm off' (or /new, /reset).\n"
+        "---\n"
+    )
+
+
+def format_prompt(history: list[dict], current_message: str, brainstorm_topic: str | None = None,
+                  brainstorm_active: bool = False) -> str:
     parts = []
 
     # Inject OpenClaw persistent context
     system_context = get_context()
     if system_context:
         parts.append(system_context)
+
+    # Brainstorm mode directive — re-injected every turn so the hard gate never
+    # drifts out of context on long threads.
+    if brainstorm_active:
+        parts.append(_brainstorm_directive(brainstorm_topic))
 
     if history:
         parts.append("[Previous conversation in this session:]")
@@ -243,7 +269,13 @@ async def handle_message(user_id: int, message: str, skip_optimize: bool = False
     else:
         optimized = message
 
-    prompt = format_prompt(history, optimized)
+    bstate = get_brainstorm_mode(user_id, project_name)
+    bactive = bool(bstate and bstate["active"])
+    prompt = format_prompt(
+        history, optimized,
+        brainstorm_topic=(bstate or {}).get("topic"),
+        brainstorm_active=bactive,
+    )
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
         None, call_claude, prompt, estimate_timeout(optimized), claude_session_id

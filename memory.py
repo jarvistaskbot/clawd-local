@@ -60,6 +60,14 @@ def init_db():
             created_at TEXT DEFAULT (datetime('now')),
             PRIMARY KEY (chat_id, thread_id)
         );
+        CREATE TABLE IF NOT EXISTS brainstorm_state (
+            user_id INTEGER NOT NULL,
+            project_name TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 0,
+            topic TEXT,
+            started_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (user_id, project_name)
+        );
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
         CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
         CREATE INDEX IF NOT EXISTS idx_telegram_log_chat ON telegram_log(chat_id, thread_id);
@@ -290,6 +298,41 @@ def delete_project_session(user_id: int, project_name: str) -> bool:
     conn.commit()
     conn.close()
     return cur.rowcount > 0
+
+
+# --- Brainstorm Mode ---
+
+def set_brainstorm_mode(user_id: int, project_name: str, active: bool, topic: Optional[str] = None) -> None:
+    """Enable or disable brainstorm mode for a user's project session."""
+    conn = _connect()
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT INTO brainstorm_state (user_id, project_name, active, topic, started_at) "
+        "VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(user_id, project_name) DO UPDATE SET "
+        "active = excluded.active, topic = excluded.topic, started_at = excluded.started_at",
+        (user_id, project_name, 1 if active else 0, topic, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_brainstorm_mode(user_id: int, project_name: str) -> Optional[dict]:
+    """Return {'active': bool, 'topic': str|None} if a row exists, else None."""
+    conn = _connect()
+    row = conn.execute(
+        "SELECT active, topic FROM brainstorm_state WHERE user_id = ? AND project_name = ?",
+        (user_id, project_name),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"active": bool(row["active"]), "topic": row["topic"]}
+
+
+def clear_brainstorm_mode(user_id: int, project_name: str) -> None:
+    """Disable brainstorm mode for a user's project session (idempotent)."""
+    set_brainstorm_mode(user_id, project_name, active=False, topic=None)
 
 
 def _get_project_chat_session_id(user_id: int, project_name: str) -> Optional[int]:

@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.constants import ChatAction
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
@@ -23,9 +23,35 @@ from memory import (
     reset_project_session, get_project_claude_session_id,
     log_telegram_message, search_telegram_log,
     get_thread_project, set_thread_project, list_thread_projects,
+    set_brainstorm_mode, get_brainstorm_mode, clear_brainstorm_mode,
 )
 from agent import handle_message, abort_current_task, set_model, get_model, MODEL_ALIASES, _task_aborted
 from subagent import spawn_subagent, list_subagents, kill_subagent, cleanup_done_subagents
+
+# Slash-command menu shown in the Telegram client (registered via set_my_commands on startup)
+BOT_COMMANDS = [
+    BotCommand("brainstorm", "Design-before-code mode (off to end)"),
+    BotCommand("session", "Switch to a project session"),
+    BotCommand("sessions", "List all project sessions"),
+    BotCommand("new", "Start a new session (history preserved)"),
+    BotCommand("reset", "Start a fresh conversation"),
+    BotCommand("clear", "Remove last N messages from context"),
+    BotCommand("compact", "Summarize history to save context"),
+    BotCommand("history", "Show recent messages"),
+    BotCommand("search", "Search past messages"),
+    BotCommand("models", "List available Claude models"),
+    BotCommand("model", "Switch Claude model"),
+    BotCommand("stats", "Show session statistics"),
+    BotCommand("status", "System health status"),
+    BotCommand("agents", "List running subagents"),
+    BotCommand("thread", "Tag this thread to a project"),
+    BotCommand("kill", "Abort the current task"),
+    BotCommand("restart", "Restart the bot"),
+    BotCommand("stop", "Shut down the bot"),
+    BotCommand("start", "Bot status and diagnostics"),
+    BotCommand("help", "Show help"),
+]
+
 
 async def handle_message_direct(user_id: int, message: str) -> dict:
     """Handle message skipping OpenAI optimization — used for media (images, voice, video)."""
@@ -261,6 +287,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/new - Start new session (history preserved)\n"
         "/reset - Start a fresh conversation\n"
         "/clear [N] - Remove last N messages from context (default 5)\n"
+        "/brainstorm <topic> - Design-before-code mode (/brainstorm off to end)\n"
+        "/compact - Summarize history to save context\n"
         "/history - Show recent messages\n"
         "/stats - Show session statistics\n"
         "/status - System health status\n"
@@ -377,6 +405,7 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     project_name = get_active_project(user_id)
     reset_project_session(user_id, project_name)
+    clear_brainstorm_mode(user_id, project_name)
     await update.effective_message.reply_text(f"Conversation reset for project '{project_name}'. Starting fresh!")
 
 
@@ -386,6 +415,7 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     project_name = get_active_project(user_id)
     reset_project_session(user_id, project_name)
+    clear_brainstorm_mode(user_id, project_name)
     await update.effective_message.reply_text(
         f"🆕 New session started for project '{project_name}'. Previous history preserved but not active."
     )
@@ -406,6 +436,55 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session_id = get_or_create_project_chat_session(user_id, project_name)
     deleted = clear_last_messages(session_id, count)
     await update.effective_message.reply_text(f"🗑 Cleared last {deleted} messages from project '{project_name}'.")
+
+
+async def brainstorm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/brainstorm <topic> — enter structured design-before-code mode (obra/superpowers
+    brainstorming skill). /brainstorm off ends it. No args shows status.
+    """
+    if not is_allowed(update.effective_user.id):
+        return
+    user_id = update.effective_user.id
+    project_name = get_active_project(user_id)
+    args = context.args or []
+
+    # Toggle off
+    if args and args[0].lower() in ("off", "stop", "end", "done"):
+        clear_brainstorm_mode(user_id, project_name)
+        await update.effective_message.reply_text(
+            f"🧠 Brainstorm mode OFF for project '{project_name}'. Back to normal chat."
+        )
+        return
+
+    # No args → show status / usage
+    if not args:
+        state = get_brainstorm_mode(user_id, project_name)
+        if state and state["active"]:
+            topic = state["topic"] or "(no topic set)"
+            await update.effective_message.reply_text(
+                f"🧠 Brainstorm mode is ON for '{project_name}'.\nTopic: {topic}\n\n"
+                "Send /brainstorm off to end it."
+            )
+        else:
+            await update.effective_message.reply_text(
+                "🧠 Brainstorm mode — structured design-before-code (diverge → converge).\n\n"
+                "Usage:\n"
+                "  /brainstorm <topic> — start a session on that topic\n"
+                "  /brainstorm off — end the session\n\n"
+                "While on, I explore context, ask one question at a time, propose 2-3 "
+                "approaches, and present a design for your approval before any implementation."
+            )
+        return
+
+    # Start / update topic
+    topic = " ".join(args).strip()
+    set_brainstorm_mode(user_id, project_name, active=True, topic=topic)
+    await update.effective_message.reply_text(
+        f"🧠 Brainstorm mode ON for '{project_name}'.\nTopic: {topic}\n\n"
+        "I'll explore context and ask my first question. No code until we've agreed a design. "
+        "Send /brainstorm off anytime to stop.\n\n"
+        "Type your first message (or just say 'go') to begin."
+    )
 
 
 async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1177,6 +1256,7 @@ def main():
     app.add_handler(CommandHandler("reset", reset_command))
     app.add_handler(CommandHandler("new", new_command))
     app.add_handler(CommandHandler("clear", clear_command))
+    app.add_handler(CommandHandler("brainstorm", brainstorm_command))
     app.add_handler(CommandHandler("compact", compact_command))
     app.add_handler(CommandHandler("history", history_command))
     app.add_handler(CommandHandler("stats", stats_command))
@@ -1199,6 +1279,11 @@ def main():
         bot_instance = application.bot
         queue_manager.start()
         asyncio.create_task(run_watchdog(interval_seconds=60, send_alert=_send_telegram_alert))
+        try:
+            await application.bot.set_my_commands(BOT_COMMANDS)
+            logger.info("Registered %d bot commands with Telegram.", len(BOT_COMMANDS))
+        except Exception:
+            logger.exception("Failed to register bot commands")
         logger.info("Queue manager and watchdog started.")
 
     app.post_init = post_init

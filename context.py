@@ -59,6 +59,18 @@ def build_system_context(for_subagent: bool = False) -> str:
                 content = content[:max_len] + "\n... (truncated)"
             sections.append(f"## {path.name}\n{content}")
 
+    # Available skills index (general skills the bot can load on demand).
+    # Only the index lives in context; read the SKILL.md file when a trigger matches.
+    sections.append(
+        "## Available Skills\n"
+        "When a task matches a skill's trigger, READ the skill file and follow it before acting. "
+        "Do not rely on this summary alone.\n"
+        "- **writing-skills** — Use when creating, editing, or verifying a skill (SKILL.md files). "
+        "Read `/Users/openclaw/clawd-local/skills/writing-skills/SKILL.md`.\n"
+        "- **brainstorming** — Structured design-before-code mode; user starts it with the "
+        "`/brainstorm` command. Read `/Users/openclaw/clawd-local/skills/brainstorming/SKILL.md`."
+    )
+
     # Recent daily notes
     daily = _load_recent_daily_notes(days=7)
     if daily:
