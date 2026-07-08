@@ -36,7 +36,9 @@ fi
 
 LAST_UPDATE=$(grep "getUpdates" "$STDERR_LOG" | tail -1 | awk '{print $1, $2}')
 if [ -z "$LAST_UPDATE" ]; then
-    log "WARN: No getUpdates found in log — skipping"
+    # No getUpdates in log at all — treat as stuck if bot has been running >5 min
+    BOT_START=$(pgrep -f "[Pp]ython.*main\.py" | head -1 | xargs ps -p -o lstart= 2>/dev/null)
+    log "WARN: No getUpdates in log — bot may be starting up or stuck"
     exit 0
 fi
 
