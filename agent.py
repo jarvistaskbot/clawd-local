@@ -96,7 +96,7 @@ def _format_yerevan_ts(iso_utc) -> str:
 BRAINSTORM_SKILL_PATH = "/Users/openclaw/clawd-local/skills/brainstorming/SKILL.md"
 
 
-def _brainstorm_directive(topic: str | None) -> str:
+def _brainstorm_directive(topic) -> str:
     topic_line = f"Topic: {topic}\n" if topic else ""
     return (
         "[BRAINSTORM MODE ACTIVE]\n"
@@ -113,7 +113,7 @@ def _brainstorm_directive(topic: str | None) -> str:
     )
 
 
-def format_prompt(history: list[dict], current_message: str, brainstorm_topic: str | None = None,
+def format_prompt(history, current_message: str, brainstorm_topic=None,
                   brainstorm_active: bool = False) -> str:
     parts = []
 
