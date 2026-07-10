@@ -323,7 +323,7 @@ async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         current = get_model()
         alias = next((a for a, m in MODEL_ALIASES.items() if m == current), current)
-        await update.effective_message.reply_text(f"Current model: {alias} ({current})\nUsage: /model opus|opus47|sonnet|haiku")
+        await update.effective_message.reply_text(f"Current model: {alias} ({current})\nUsage: /model fable|opus|opus47|sonnet|haiku")
         return
     try:
         resolved = set_model(args[0])
