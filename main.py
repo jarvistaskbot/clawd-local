@@ -15,6 +15,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 from config import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS, TELEGRAM_CHAT_ID,
     CLAUDE_CLI_PATH, CLAUDE_MODEL, OPENAI_ENABLED, OPENAI_MODEL,
+    AUTO_COMPACT_THRESHOLD,
 )
 from memory import (
     init_db, get_or_create_session, get_history, add_message, reset_session, get_stats, clear_last_messages,
@@ -24,6 +25,7 @@ from memory import (
     log_telegram_message, search_telegram_log,
     get_thread_project, set_thread_project, list_thread_projects,
     set_brainstorm_mode, get_brainstorm_mode, clear_brainstorm_mode,
+    count_project_messages,
 )
 from agent import handle_message, abort_current_task, set_model, get_model, MODEL_ALIASES, _task_aborted
 from subagent import spawn_subagent, list_subagents, kill_subagent, cleanup_done_subagents
@@ -123,13 +125,16 @@ def split_message(text: str, max_len: int = 4096) -> list[str]:
     return chunks
 
 
+def _escape_mentions(text: str) -> str:
+    """Escape underscores inside @mentions so Telegram Markdown doesn't eat them."""
+    return re.sub(r'@(\w+)', lambda m: '@' + m.group(1).replace('_', r'\_'), text)
+
+
 async def safe_reply(message, text: str):
     """Send with Markdown, fall back to plain text if parsing fails."""
     try:
-        await message.reply_text(text, parse_mode="Markdown")
+        await message.reply_text(_escape_mentions(text), parse_mode="Markdown")
     except Exception:
-        # Strip markdown syntax and send plain
-        import re
         plain = re.sub(r'[*_`\[\]()]', '', text)
         await message.reply_text(plain)
 
@@ -233,7 +238,7 @@ async def safe_reply_in_thread(message, text: str, thread_id: Optional[int] = No
     if thread_id is not None:
         kwargs["message_thread_id"] = thread_id
     try:
-        await message.reply_text(text, parse_mode="Markdown", **kwargs)
+        await message.reply_text(_escape_mentions(text), parse_mode="Markdown", **kwargs)
     except Exception:
         plain = re.sub(r'[*_`\[\]()]', '', text)
         try:
@@ -533,6 +538,50 @@ async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(f"Compact failed: {e}")
 
 
+async def _run_compact_silent(session_id, msg_count, bot, chat_id):
+    """Auto-compact: notify → summarize → clear → store. Called as a background task."""
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"🗜 Auto-compacting {msg_count} messages — hold off a moment...",
+        )
+        messages = get_history(session_id, limit=50)
+        if len(messages) < 4:
+            return
+        conv_text = "\n".join(
+            f"{m['role'].upper()}: {m['content'][:500]}" for m in messages
+        )
+        summary_prompt = (
+            "Summarize this conversation history concisely in bullet points. "
+            "Preserve all important decisions, facts, code changes, and context. "
+            f"Be thorough but compact.\n\n{conv_text}"
+        )
+        loop = asyncio.get_event_loop()
+        from agent import call_claude
+        result = await loop.run_in_executor(None, call_claude, summary_prompt, 300)
+        summary = result.get("response", "") if isinstance(result, dict) else str(result)
+        clear_last_messages(session_id, len(messages))
+        add_message(session_id, "assistant",
+            f"[COMPACTED CONTEXT — {len(messages)} messages summarized]\n\n{summary}")
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"✅ Done — {len(messages)} messages compacted, context is fresh.",
+        )
+    except Exception as e:
+        logger.error("Auto-compact failed: %s", e)
+
+
+async def _maybe_auto_compact(user_id, chat_id, bot):
+    """Check session message count and trigger auto-compact if threshold is reached."""
+    if AUTO_COMPACT_THRESHOLD <= 0:
+        return
+    project_name = get_active_project(user_id)
+    session_id = get_or_create_project_chat_session(user_id, project_name)
+    count = count_project_messages(user_id, project_name)
+    if count >= AUTO_COMPACT_THRESHOLD:
+        await _run_compact_silent(session_id, count, bot, chat_id)
+
+
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         return
@@ -803,6 +852,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await _send_file_if_requested(context, update.effective_chat.id, file_to_send)
         await _handle_spawn(user_id, update.effective_chat.id, spawn_task)
+        asyncio.create_task(_maybe_auto_compact(user_id, update.effective_chat.id, context.bot))
     except QueueFullError:
         await update.effective_message.reply_text("🚫 Queue is full. Please wait a moment and try again.")
     except Exception as e:

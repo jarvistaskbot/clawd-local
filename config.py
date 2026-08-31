@@ -30,6 +30,9 @@ MAX_OPTIMIZED_PROMPT_LENGTH = int(os.getenv("MAX_OPTIMIZED_PROMPT_LENGTH", "4000
 CLAUDE_QUEUE_SIZE = int(os.getenv("CLAUDE_QUEUE_SIZE", "10"))
 CLAUDE_MAX_CONCURRENCY = int(os.getenv("CLAUDE_MAX_CONCURRENCY", "1"))
 
+# Auto-compact: trigger compaction when a session reaches this many messages (0 = disabled)
+AUTO_COMPACT_THRESHOLD = int(os.getenv("AUTO_COMPACT_THRESHOLD", "40"))
+
 # Log rotation
 LOG_ROTATION_MAX_BYTES = int(os.getenv("LOG_ROTATION_MAX_BYTES", "10485760"))
 LOG_ROTATION_BACKUP_COUNT = int(os.getenv("LOG_ROTATION_BACKUP_COUNT", "5"))

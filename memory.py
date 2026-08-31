@@ -288,6 +288,9 @@ def _count_project_messages(user_id: int, project_name: str) -> int:
     return row["c"]
 
 
+count_project_messages = _count_project_messages
+
+
 def delete_project_session(user_id: int, project_name: str) -> bool:
     """Delete a project session. Returns True if deleted."""
     conn = _connect()
