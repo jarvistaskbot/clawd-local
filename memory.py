@@ -403,7 +403,7 @@ def log_telegram_message(
     return cur.lastrowid
 
 
-def search_telegram_log(query: str, limit: int = 20) -> list[dict]:
+def search_telegram_log(query: str, limit: int = 20):
     """Full-text search over telegram_log content."""
     conn = _connect()
     rows = conn.execute(
@@ -441,7 +441,7 @@ def set_thread_project(chat_id: int, thread_id: int, project_name: str) -> None:
     conn.close()
 
 
-def list_thread_projects(chat_id: int) -> list[dict]:
+def list_thread_projects(chat_id: int):
     """List all thread→project mappings for a chat."""
     conn = _connect()
     rows = conn.execute(

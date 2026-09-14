@@ -107,7 +107,7 @@ def is_allowed(user_id: int) -> bool:
     return user_id in TELEGRAM_ALLOWED_USERS
 
 
-def split_message(text: str, max_len: int = 4096) -> list[str]:
+def split_message(text: str, max_len: int = 4096):
     if not text:
         return []
     if len(text) <= max_len:
