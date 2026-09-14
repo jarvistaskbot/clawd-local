@@ -538,12 +538,19 @@ async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(f"Compact failed: {e}")
 
 
+# Prevent concurrent/loop auto-compacts
+_compact_in_progress = set()
+
 async def _run_compact_silent(session_id, msg_count, bot, chat_id):
-    """Auto-compact: notify → summarize → clear → store. Called as a background task."""
+    """Auto-compact: notify -> summarize -> clear -> store."""
+    if session_id in _compact_in_progress:
+        logger.info("Auto-compact already running for session %s, skipping", session_id)
+        return
+    _compact_in_progress.add(session_id)
     try:
         await bot.send_message(
             chat_id=chat_id,
-            text=f"🗜 Auto-compacting {msg_count} messages — hold off a moment...",
+            text=f"\U0001f5c4 Auto-compacting {msg_count} messages \u2014 hold off a moment...",
         )
         messages = get_history(session_id, limit=50)
         if len(messages) < 4:
@@ -558,17 +565,23 @@ async def _run_compact_silent(session_id, msg_count, bot, chat_id):
         )
         loop = asyncio.get_event_loop()
         from agent import call_claude
-        result = await loop.run_in_executor(None, call_claude, summary_prompt, 1200)
+        result = await loop.run_in_executor(None, call_claude, summary_prompt, 120)
         summary = result.get("response", "") if isinstance(result, dict) else str(result)
+        if not summary or "exited with code" in summary or "timed out" in summary:
+            logger.error("Auto-compact aborted - Claude error: %s", summary[:100])
+            await bot.send_message(chat_id=chat_id, text="\u26a0\ufe0f Auto-compact skipped (Claude error) \u2014 history unchanged.")
+            return
         clear_last_messages(session_id, len(messages))
         add_message(session_id, "assistant",
-            f"[COMPACTED CONTEXT — {len(messages)} messages summarized]\n\n{summary}")
+            f"[COMPACTED CONTEXT \u2014 {len(messages)} messages summarized]\n\n{summary}")
         await bot.send_message(
             chat_id=chat_id,
-            text=f"✅ Done — {len(messages)} messages compacted, context is fresh.",
+            text=f"\u2705 Done \u2014 {len(messages)} messages compacted, context is fresh.",
         )
     except Exception as e:
         logger.error("Auto-compact failed: %s", e)
+    finally:
+        _compact_in_progress.discard(session_id)
 
 
 async def _maybe_auto_compact(user_id, chat_id, bot):
@@ -577,10 +590,11 @@ async def _maybe_auto_compact(user_id, chat_id, bot):
         return
     project_name = get_active_project(user_id)
     session_id = get_or_create_project_chat_session(user_id, project_name)
+    if session_id in _compact_in_progress:
+        return
     count = count_project_messages(user_id, project_name)
     if count >= AUTO_COMPACT_THRESHOLD:
         await _run_compact_silent(session_id, count, bot, chat_id)
-
 
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
