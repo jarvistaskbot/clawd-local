@@ -143,6 +143,19 @@ def format_prompt(history, current_message: str, brainstorm_topic=None,
     return "\n".join(parts)
 
 
+def _is_session_valid(session_id: str) -> bool:
+    """Check if a Claude session file exists and was used within last 12 hours."""
+    import os as _os, glob, time as _time
+    pattern = _os.path.expanduser(f"~/.claude/projects/**/{session_id}.jsonl")
+    matches = glob.glob(pattern, recursive=True)
+    if not matches:
+        return False
+    # Check if file was modified recently (within 12h)
+    mtime = _os.path.getmtime(matches[0])
+    age_hours = (_time.time() - mtime) / 3600
+    return age_hours < 12
+
+
 def estimate_timeout(prompt: str):
     """Max 20 minutes — prevents infinite hang."""
     return 1200  # 20 minutes hard cap
@@ -162,8 +175,10 @@ def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dic
         "--permission-mode", "bypassPermissions",
         "--output-format", "json",
     ]
-    if claude_session_id:
-        cmd.extend(["--resume", claude_session_id])
+    # NOTE: --resume disabled — causes hangs on large sessions (13MB+) and context bloat.
+    # Bot manages history via SQLite; Claude session continuity is not needed.
+    # if claude_session_id and _is_session_valid(claude_session_id):
+    #     cmd.extend(["--resume", claude_session_id])
     cmd.append(prompt)
     try:
         proc = subprocess.Popen(
@@ -212,11 +227,12 @@ def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dic
             is_bad_session = (
                 "no conversation found" in stderr_lower or
                 "session" in stderr_lower and "not found" in stderr_lower or
-                "invalid session" in stderr_lower
+                "invalid session" in stderr_lower or
+                "resume requires" in stderr_lower
             )
             if is_bad_session:
                 logger.warning("[Claude] Bad --resume session ID detected — caller should clear and retry")
-                return {"response": None, "session_id": None, "bad_session": True}
+                return {"response": "", "session_id": None, "bad_session": True}
             if stderr:
                 return {"response": f"Error from Claude CLI:\n{stderr}", "session_id": None}
             return {"response": f"Claude CLI exited with code {returncode}", "session_id": None}
