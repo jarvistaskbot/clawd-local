@@ -196,7 +196,12 @@ async def _handle_spawn(user_id: int, chat_id: int, spawn_task: str):
     """Spawn a subagent and notify the user."""
     if not spawn_task:
         return
-    agent_id = await spawn_subagent(user_id, spawn_task, _subagent_notify)
+    try:
+        agent_id = await spawn_subagent(user_id, spawn_task, _subagent_notify)
+    except RuntimeError as e:
+        if bot_instance:
+            await bot_instance.send_message(chat_id=chat_id, text=f"⚠️ Cannot spawn subagent: {e}")
+        return
     if bot_instance:
         try:
             await bot_instance.send_message(

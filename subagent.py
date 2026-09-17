@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 # Track running subagents: {id: {process, started_at, task_desc, user_id}}
 _subagents: dict = {}
 
+MAX_CONCURRENT_SUBAGENTS = 2  # Limit to prevent Claude Max session burnout
+
 
 def list_subagents() -> list:
     """Return list of running subagent dicts (without process objects)."""
@@ -35,6 +37,11 @@ async def spawn_subagent(user_id: int, task: str, notify_callback) -> str:
     Returns agent_id. When done, calls notify_callback(user_id, agent_id, result, success).
     """
     agent_id = str(uuid.uuid4())[:8]
+
+    # Enforce concurrency cap
+    running = sum(1 for a in _subagents.values() if a.get("status") == "running")
+    if running >= MAX_CONCURRENT_SUBAGENTS:
+        raise RuntimeError(f"Too many subagents running ({running}/{MAX_CONCURRENT_SUBAGENTS}). Wait for one to finish.")
 
     from config import CLAUDE_CLI_PATH, CLAUDE_MODEL, WORKSPACE_DIR
     from context import get_context
