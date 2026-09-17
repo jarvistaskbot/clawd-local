@@ -157,12 +157,8 @@ def _is_session_valid(session_id: str) -> bool:
 
 
 def estimate_timeout(prompt: str):
-    """Adaptive timeout based on task complexity."""
-    p = prompt.lower()
-    # Long tasks: audit, subagents, full implementation
-    if any(kw in p for kw in ["subagent", "full audit", "codebase audit", "implement", "build", "refactor"]):
-        return 3600  # 60 minutes for complex multi-step tasks
-    return 1200  # 20 minutes default
+    """Max 20 minutes — prevents infinite hang."""
+    return 1200  # 20 minutes hard cap
 
 
 def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dict:

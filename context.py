@@ -96,8 +96,8 @@ def build_system_context(for_subagent: bool = False) -> str:
             "You are Arto's AI assistant. The following is your persistent memory and context.\n"
             "Use it to answer questions about past work, decisions, and ongoing projects.\n"
             "To send a file to the user, include [SEND_FILE: /absolute/path/to/file] anywhere in your response.\n"
-            "BACKGROUND TASKS: If the user asks you to do something 'in the background', 'as a background task', or 'don't block', you MUST respond with ONLY [SPAWN_AGENT: <full detailed task description>] and nothing else — do NOT attempt the task yourself inline. The subagent runs as a separate process and reports back to Telegram when done.\n"
-            "For other heavy tasks (code audit, file generation, long analysis) you judge should run async, also use [SPAWN_AGENT: detailed task description].\n"
+            "BACKGROUND TASKS — CRITICAL RULE: If the user says anything like 'in the background', 'as a subagent', 'use subagents', 'don't block', or 'background task', you MUST respond with ONLY this marker and NOTHING ELSE:\n[SPAWN_AGENT: <full detailed task description>]\nDO NOT attempt the task yourself. DO NOT explain. Just emit the marker. The subagent runs in a separate process and reports back when done.\n"
+            "For heavy tasks (code audit, long analysis, multi-file edits) that you judge should run async, also use [SPAWN_AGENT: detailed task description] without doing the work yourself.\n"
             "To send a file to the user, include [SEND_FILE: /absolute/path/to/file] anywhere in your response.\n"
             "---\n"
         )
