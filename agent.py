@@ -208,6 +208,15 @@ def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dic
                     "Check Anthropic Extra Usage balance at console.anthropic.com\n"
                     "Or re-login: `claude logout && claude login`"
                 ), "session_id": None, "auth_error": True}
+            # Detect expired/missing --resume session
+            is_bad_session = (
+                "no conversation found" in stderr_lower or
+                "session" in stderr_lower and "not found" in stderr_lower or
+                "invalid session" in stderr_lower
+            )
+            if is_bad_session:
+                logger.warning("[Claude] Bad --resume session ID detected — caller should clear and retry")
+                return {"response": None, "session_id": None, "bad_session": True}
             if stderr:
                 return {"response": f"Error from Claude CLI:\n{stderr}", "session_id": None}
             return {"response": f"Claude CLI exited with code {returncode}", "session_id": None}
@@ -287,6 +296,17 @@ async def handle_message(user_id: int, message: str, skip_optimize: bool = False
     if result.get("aborted"):
         _task_aborted.clear()
         return ""
+
+    # --resume session expired: clear bad session ID and retry fresh
+    if result.get("bad_session"):
+        logger.warning("[Agent] Clearing expired Claude session ID for project '%s', retrying...", project_name)
+        update_project_claude_session(user_id, project_name, None)
+        result = await loop.run_in_executor(
+            None, call_claude, prompt, estimate_timeout(optimized), None
+        )
+        if result.get("aborted"):
+            _task_aborted.clear()
+            return ""
 
     response = result["response"]
 
