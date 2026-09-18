@@ -767,44 +767,6 @@ async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(f"Upload failed: {e}")
 
 
-PROJECT_KEYWORDS = {
-    # Removed "chrome" (too generic: "chrome browser is slow" is a FP)
-    "tls": ["tls", "germany", "italy", "cyprus", "visa", "appointment", "booking", "tlscontact",
-            "extension", "cloudflare", "cf", "1015", "pac", "proxy", "slot"],
-    # Removed "spot" ("good spot today" FP) and "trade" ("trade ideas" FP)
-    "arbitrage": ["arbitrage", "bybit", "binance", "trading", "funding", "basis", "perp",
-                  "futures", "delivery", "delta", "pnl", "p&l", "position",
-                  "bot open", "bot close", "usdt", "mnt", "xaut", "doge"],
-}
-_DETECT_THRESHOLD = 2
-
-
-def _detect_project(text: str):
-    """Return project name if keyword score >= threshold, else None.
-
-    Uses word-boundary matching for single-word keywords to prevent substring
-    false positives (e.g. "pac" matching "impact"). Compound keywords like
-    "bot open" use plain substring matching.
-    Threshold of 2 means a single generic keyword never fires alone.
-    """
-    lower = text.lower()
-    scores = {}
-    for project, keywords in PROJECT_KEYWORDS.items():
-        score = 0
-        for kw in keywords:
-            if " " in kw:
-                if kw in lower:
-                    score += 1
-            else:
-                if re.search(r'\b' + re.escape(kw) + r'\b', lower):
-                    score += 1
-        if score >= _DETECT_THRESHOLD:
-            scores[project] = score
-    if not scores:
-        return None
-    return max(scores, key=scores.get)
-
-
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global _last_activity
     if not is_allowed(update.effective_user.id):
