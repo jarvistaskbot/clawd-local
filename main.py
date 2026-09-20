@@ -369,16 +369,10 @@ async def kill_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 1. Abort the active Claude subprocess and flag the result to be discarded
     abort_current_task()
 
-    # 2. Drain the pending queue so no queued messages start running
-    drained = 0
-    while not queue_manager._queue.empty():
-        try:
-            queue_manager._queue.get_nowait()
-            queue_manager._queue.task_done()
-            queue_manager._pending_count = max(0, queue_manager._pending_count - 1)
-            drained += 1
-        except Exception:
-            break
+    # 2. Drain the pending queue so no queued messages start running.
+    # drain() resolves the queued futures so their handlers unblock (otherwise
+    # the typing indicator for those messages spins forever).
+    drained = queue_manager.drain()
 
     # 3. Fallback: broad pgrep kill for any lingering Claude processes (NOT subagents)
     bot_pid = os.getpid()
@@ -504,7 +498,8 @@ async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     project_name = get_active_project(user_id)
     session_id = get_or_create_project_chat_session(user_id, project_name)
-    messages = get_history(session_id, limit=50)
+    from memory import get_history_with_ids, delete_messages_by_ids
+    messages = get_history_with_ids(session_id, limit=50)
 
     if len(messages) < 4:
         await update.effective_message.reply_text("Not enough history to compact (need at least 4 messages).")
@@ -529,9 +524,9 @@ async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = await loop.run_in_executor(None, call_claude, summary_prompt, 1200)
         summary = result.get("response", "") if isinstance(result, dict) else str(result)
 
-        # Clear old history and replace with summary
-        from memory import clear_last_messages
-        clear_last_messages(session_id, len(messages))
+        # Delete exactly the summarized messages — anything that arrived while
+        # Claude was summarizing stays in history untouched.
+        delete_messages_by_ids([m["id"] for m in messages])
         add_message(session_id, "assistant",
             f"[COMPACTED CONTEXT — {len(messages)} messages summarized]\n\n{summary}")
 
@@ -557,7 +552,8 @@ async def _run_compact_silent(session_id, msg_count, bot, chat_id):
             chat_id=chat_id,
             text=f"\U0001f5c4 Auto-compacting {msg_count} messages \u2014 hold off a moment...",
         )
-        messages = get_history(session_id, limit=50)
+        from memory import get_history_with_ids, delete_messages_by_ids
+        messages = get_history_with_ids(session_id, limit=50)
         if len(messages) < 4:
             return
         conv_text = "\n".join(
@@ -573,10 +569,12 @@ async def _run_compact_silent(session_id, msg_count, bot, chat_id):
         result = await loop.run_in_executor(None, call_claude, summary_prompt, 120)
         summary = result.get("response", "") if isinstance(result, dict) else str(result)
         if not summary or "exited with code" in summary or "timed out" in summary:
-            logger.error("Auto-compact aborted - Claude error: %s", summary[:100])
+            logger.error("Auto-compact aborted - Claude error: %s", (summary or "")[:100])
             await bot.send_message(chat_id=chat_id, text="\u26a0\ufe0f Auto-compact skipped (Claude error) \u2014 history unchanged.")
             return
-        clear_last_messages(session_id, len(messages))
+        # Delete exactly the summarized messages \u2014 new ones that arrived during
+        # summarization stay in history untouched.
+        delete_messages_by_ids([m["id"] for m in messages])
         add_message(session_id, "assistant",
             f"[COMPACTED CONTEXT \u2014 {len(messages)} messages summarized]\n\n{summary}")
         await bot.send_message(

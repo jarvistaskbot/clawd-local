@@ -16,8 +16,10 @@ if [ -f "$PIDFILE" ]; then
     rm -f "$PIDFILE"
 fi
 
-# Kill any stray instances
-pkill -9 -f "main\.py" 2>/dev/null
+# Kill any stray bot instances. Anchored to end-of-cmdline so it only matches
+# "<python> main.py" itself — an unanchored "main.py" also matches claude CLI
+# processes whose prompt text mentions main.py, killing in-flight tasks.
+pkill -9 -f "[Pp]ython[0-9.]* main\.py$" 2>/dev/null
 sleep 4
 
 # Wait for network (up to 90s)

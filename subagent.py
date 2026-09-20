@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 _subagents: dict = {}
 
 MAX_CONCURRENT_SUBAGENTS = 2  # Limit to prevent Claude Max session burnout
+SUBAGENT_TIMEOUT_SECONDS = 3600  # Hard cap — a hung subagent otherwise holds a slot forever
 
 
 def list_subagents() -> list:
@@ -43,14 +44,15 @@ async def spawn_subagent(user_id: int, task: str, notify_callback) -> str:
     if running >= MAX_CONCURRENT_SUBAGENTS:
         raise RuntimeError(f"Too many subagents running ({running}/{MAX_CONCURRENT_SUBAGENTS}). Wait for one to finish.")
 
-    from config import CLAUDE_CLI_PATH, CLAUDE_MODEL, WORKSPACE_DIR
+    from config import CLAUDE_CLI_PATH, WORKSPACE_DIR
+    from agent import get_model
     from context import get_context
     system_context = get_context(for_subagent=True)
     full_prompt = f"{system_context}\n\n[TASK TO COMPLETE — do the work yourself and print the result]\n{task}" if system_context else task
     cmd = [
         CLAUDE_CLI_PATH,
         "--print",
-        "--model", CLAUDE_MODEL,
+        "--model", get_model(),
         "--permission-mode", "bypassPermissions",
         full_prompt,
     ]
@@ -79,13 +81,23 @@ async def spawn_subagent(user_id: int, task: str, notify_callback) -> str:
 
 
 async def _monitor_subagent(agent_id: str, process, notify_callback):
-    """Wait for subagent to finish and call notify_callback."""
+    """Wait for subagent to finish (with hard timeout) and call notify_callback."""
     try:
-        stdout, stderr = await process.communicate()
+        timed_out = False
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=SUBAGENT_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            timed_out = True
+            _kill_process_group(process.pid)
+            stdout, stderr = await process.communicate()
         result = stdout.decode("utf-8", errors="replace").strip()
         if not result and stderr:
             result = stderr.decode("utf-8", errors="replace").strip()
-        success = process.returncode == 0
+        if timed_out:
+            result = f"Subagent timed out after {SUBAGENT_TIMEOUT_SECONDS // 60} minutes and was killed.\n\nPartial output:\n{result[:2000]}"
+        success = process.returncode == 0 and not timed_out
 
         if agent_id in _subagents:
             _subagents[agent_id]["status"] = "done" if success else "failed"
@@ -100,13 +112,24 @@ async def _monitor_subagent(agent_id: str, process, notify_callback):
             _subagents[agent_id]["status"] = "crashed"
 
 
+def _kill_process_group(pid: int):
+    """Kill a subagent and its children (start_new_session=True makes pid == pgid)."""
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except Exception:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except Exception:
+            pass
+
+
 def kill_subagent(agent_id: str) -> bool:
     """Kill a running subagent. Returns True if killed."""
     agent = _subagents.get(agent_id)
     if not agent or agent.get("status") != "running":
         return False
     try:
-        os.kill(agent["pid"], signal.SIGTERM)
+        _kill_process_group(agent["pid"])
         _subagents[agent_id]["status"] = "killed"
         return True
     except Exception:

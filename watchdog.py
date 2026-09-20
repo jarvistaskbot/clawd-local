@@ -15,6 +15,7 @@ _healthy = True
 
 
 async def check_claude_health() -> bool:
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             CLAUDE_CLI_PATH, "--version",
@@ -24,6 +25,12 @@ async def check_claude_health() -> bool:
         await asyncio.wait_for(proc.wait(), timeout=5)
         return proc.returncode == 0
     except Exception:
+        # Kill a hung probe so it doesn't linger as a zombie
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
         return False
 
 

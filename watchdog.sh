@@ -10,10 +10,14 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG"
 }
 
+# Anchored: matches only "<python> main.py" itself, not claude CLI processes
+# whose prompt text happens to contain "python ... main.py".
+BOT_PATTERN="[Pp]ython[0-9.]* main\.py$"
+
 restart_bot() {
     log "ACTION: Killing all claude + bot processes"
     pkill -9 -f "claude" 2>/dev/null
-    pkill -9 -f "[Pp]ython.*main\.py" 2>/dev/null
+    pkill -9 -f "$BOT_PATTERN" 2>/dev/null
     sleep 3
     launchctl unload "$HOME/Library/LaunchAgents/com.clawd.local.plist" 2>/dev/null
     sleep 2
@@ -22,7 +26,7 @@ restart_bot() {
 }
 
 # Check 1: Is the bot process running? (matches Python, python3, or Python3 running main.py)
-if ! pgrep -f "[Pp]ython.*main\.py" > /dev/null 2>&1; then
+if ! pgrep -f "$BOT_PATTERN" > /dev/null 2>&1; then
     log "DEAD: bot process not running — restarting"
     restart_bot
     exit 0
@@ -37,7 +41,7 @@ fi
 LAST_UPDATE=$(grep "getUpdates" "$STDERR_LOG" | tail -1 | awk '{print $1, $2}')
 if [ -z "$LAST_UPDATE" ]; then
     # No getUpdates in log at all — treat as stuck if bot has been running >5 min
-    BOT_START=$(pgrep -f "[Pp]ython.*main\.py" | head -1 | xargs ps -p -o lstart= 2>/dev/null)
+    BOT_START=$(pgrep -f "$BOT_PATTERN" | head -1 | xargs ps -p -o lstart= 2>/dev/null)
     log "WARN: No getUpdates in log — bot may be starting up or stuck"
     exit 0
 fi

@@ -42,17 +42,43 @@ class QueueManager:
         self._pending_count += 1
         return await future
 
+    def drain(self) -> int:
+        """Discard all queued (not yet running) tasks. Resolves their futures with
+        an empty result so waiting handlers unblock instead of hanging forever.
+        Returns the number of tasks discarded."""
+        drained = 0
+        while True:
+            try:
+                _, _, _, future = self._queue.get_nowait()
+            except (asyncio.QueueEmpty, AttributeError):
+                break
+            if not future.done():
+                future.set_result({"text": "", "file": None, "spawn_task": None})
+            self._pending_count = max(0, self._pending_count - 1)
+            self._queue.task_done()
+            drained += 1
+        return drained
+
     async def _worker(self):
         while True:
             user_id, message, callback, future = await self._queue.get()
             try:
                 async with self._semaphore:
                     result = await callback(user_id, message)
-                    future.set_result(result)
+                    if not future.done():
+                        future.set_result(result)
             except Exception as e:
-                future.set_exception(e)
+                # Never let a resolved/cancelled future kill the worker loop —
+                # a dead worker means the bot silently stops answering.
+                try:
+                    if not future.done():
+                        future.set_exception(e)
+                    else:
+                        logger.exception("Worker error after future resolved")
+                except Exception:
+                    logger.exception("Failed to propagate worker error")
             finally:
-                self._pending_count -= 1
+                self._pending_count = max(0, self._pending_count - 1)
                 self._queue.task_done()
 
 

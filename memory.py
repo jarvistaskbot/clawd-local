@@ -121,6 +121,34 @@ def get_history(session_id: int, limit: int = 20) -> list[dict]:
     return [{"role": r["role"], "content": r["content"], "timestamp": r["timestamp"]} for r in reversed(rows)]
 
 
+def get_history_with_ids(session_id: int, limit: int = 50) -> list:
+    """Like get_history but includes message row ids — used by compaction so it
+    deletes exactly the messages it summarized (not whatever is newest by then)."""
+    conn = _connect()
+    rows = conn.execute(
+        "SELECT id, role, content, timestamp FROM messages WHERE session_id = ? AND role != 'system' ORDER BY id DESC LIMIT ?",
+        (session_id, limit),
+    ).fetchall()
+    conn.close()
+    return [
+        {"id": r["id"], "role": r["role"], "content": r["content"], "timestamp": r["timestamp"]}
+        for r in reversed(rows)
+    ]
+
+
+def delete_messages_by_ids(ids) -> int:
+    """Delete specific message rows. Returns how many were deleted."""
+    ids = list(ids)
+    if not ids:
+        return 0
+    conn = _connect()
+    placeholders = ",".join("?" * len(ids))
+    cur = conn.execute(f"DELETE FROM messages WHERE id IN ({placeholders})", ids)
+    conn.commit()
+    conn.close()
+    return cur.rowcount
+
+
 def reset_session(user_id: int) -> int:
     conn = _connect()
     now = datetime.now(timezone.utc).isoformat()

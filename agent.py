@@ -15,12 +15,23 @@ _task_aborted = threading.Event()
 
 def abort_current_task():
     """Kill the active Claude subprocess and mark the task as aborted.
-    Called by /kill — safe to call from the asyncio thread."""
+    Called by /kill — safe to call from the asyncio thread.
+    Only sets the abort flag when a task is actually in flight, so /kill on an
+    idle bot does not swallow the next message."""
     global _active_proc
-    _task_aborted.set()
     with _active_proc_lock:
         proc = _active_proc
     if proc is not None:
+        _task_aborted.set()
+        _kill_proc_tree(proc)
+
+
+def _kill_proc_tree(proc):
+    """Kill a Popen and its children (start_new_session=True makes pid == pgid)."""
+    import os as _os, signal as _signal
+    try:
+        _os.killpg(proc.pid, _signal.SIGKILL)
+    except Exception:
         try:
             proc.kill()
         except Exception:
@@ -157,8 +168,12 @@ def _is_session_valid(session_id: str) -> bool:
 
 
 def estimate_timeout(prompt: str):
-    """Max 20 minutes — prevents infinite hang."""
-    return 1200  # 20 minutes hard cap
+    """Adaptive timeout based on task complexity."""
+    p = prompt.lower()
+    # Long tasks: audit, subagents, full implementation
+    if any(kw in p for kw in ["subagent", "audit", "implement", "build", "refactor"]):
+        return 3600  # 60 minutes for complex multi-step tasks
+    return 1200  # 20 minutes default
 
 
 def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dict:
@@ -167,6 +182,8 @@ def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dic
     Tracks the active Popen so abort_current_task() can kill it mid-run.
     """
     global _active_proc
+    # A stale abort flag from a /kill issued while idle must not cancel this new task
+    _task_aborted.clear()
     dynamic_timeout = timeout or estimate_timeout(prompt)
     cmd = [
         CLAUDE_CLI_PATH,
@@ -195,7 +212,7 @@ def call_claude(prompt: str, timeout=None, claude_session_id: str = None) -> dic
         try:
             stdout_raw, stderr_raw = proc.communicate(timeout=dynamic_timeout)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            _kill_proc_tree(proc)
             proc.communicate()
             return {"response": f"Claude CLI timed out after {dynamic_timeout}s. Try breaking the task into smaller steps.", "session_id": None}
         finally:
