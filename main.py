@@ -87,7 +87,8 @@ from watchdog import run_watchdog, check_claude_health, is_healthy, setup_log_ro
 from media_handler import (
     download_telegram_file, process_image, transcribe_audio,
     extract_video_frame, process_video, cleanup_temp_file, is_text_file, is_image_file,
-    read_text_file,
+    read_text_file, is_inbox_file, save_inbox_file,
+    extract_video_url, download_video_from_url,
 )
 
 logging.basicConfig(
@@ -802,6 +803,25 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         quoted = update.message.reply_to_message.text[:500]
         text = f"[Replying to: {quoted}]\n\n{text}"
 
+    # Video URL detection: download + analyze before queuing
+    msg_handler = handle_message
+    video_url = extract_video_url(text)
+    if video_url:
+        video_local = None
+        try:
+            await update.effective_message.reply_text("Downloading video...")
+            video_local = await download_video_from_url(video_url)
+            text = await process_video(video_local, caption=text)
+            msg_handler = handle_message_direct
+        except Exception as e:
+            logger.warning("Video URL download failed for %s: %s", video_url, e)
+            await update.effective_message.reply_text(
+                f"Could not download video ({e}). Proceeding with URL text only."
+            )
+        finally:
+            if video_local:
+                cleanup_temp_file(video_local)
+
     try:
         pending = queue_manager.pending_count
         if pending > 0:
@@ -809,7 +829,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         result = await _run_with_progress(
             update, context,
-            queue_manager.enqueue_prompt(user_id, text, handle_message)
+            queue_manager.enqueue_prompt(user_id, text, msg_handler)
         )
 
         _last_activity = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -994,6 +1014,23 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif is_text_file(filename):
             local_path = await download_telegram_file(context.bot, doc.file_id, suffix=os.path.splitext(filename)[1])
             prompt = await read_text_file(local_path, filename)
+        elif is_inbox_file(filename):
+            size_mb = (doc.file_size or 0) / (1024 * 1024)
+            if size_mb > 20:
+                await update.effective_message.reply_text(
+                    f"File is {size_mb:.0f} MB — Telegram bots can only download up to 20 MB. "
+                    "Copy it to ~/3dprint/inbox/ on the Mac mini instead and tell me the filename."
+                )
+                return
+            saved_path = await save_inbox_file(context.bot, doc.file_id, filename)
+            await update.effective_message.reply_text(f"📥 Saved: {saved_path}")
+            caption = update.message.caption or ""
+            prompt = (
+                f"User sent a file via Telegram, saved on disk at: {saved_path} "
+                f"(original name: {filename}, {doc.file_size or 0} bytes). "
+                "Do what the caption asks; if no caption, inspect the file and report what it is."
+                + (f"\nUser caption: {caption}" if caption else "")
+            )
         else:
             await update.effective_message.reply_text(f"Document type not supported: {filename}")
             return

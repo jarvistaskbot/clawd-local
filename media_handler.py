@@ -6,12 +6,13 @@ Supports: images, videos (first frame extraction), voice/audio transcription.
 import asyncio
 import logging
 import os
+import re
 import uuid
 from typing import Optional
 
 from openai import AsyncOpenAI
 
-from config import MEDIA_TEMP_DIR, WHISPER_MODEL, MAX_FILE_SIZE_MB, OPENAI_API_KEY
+from config import MEDIA_TEMP_DIR, WHISPER_MODEL, MAX_FILE_SIZE_MB, OPENAI_API_KEY, FILE_INBOX_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,65 @@ TEXT_EXTENSIONS = {
 }
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff"}
+
+# Binary files saved to the persistent inbox (not temp) so the agent can inspect them
+INBOX_EXTENSIONS = {
+    ".stl", ".3mf", ".obj", ".glb", ".gltf", ".ply",
+    ".step", ".stp", ".fbx", ".zip", ".gcode",
+}
+
+
+_VIDEO_URL_RE = re.compile(
+    r'https?://(?:'
+    r'(?:www\.)?instagram\.com/(?:reel|p|tv)/[\w-]+'
+    r'|(?:www\.)?tiktok\.com/[@\w.-]+/video/\d+'
+    r'|vm\.tiktok\.com/[\w-]+'
+    r'|(?:www\.)?youtube\.com/(?:watch\?[^\s]*|shorts/[\w-]+)'
+    r'|youtu\.be/[\w-]+'
+    r')',
+    re.IGNORECASE,
+)
+
+
+def extract_video_url(text):
+    """Return the first recognized video URL from text, or None."""
+    m = _VIDEO_URL_RE.search(text)
+    return m.group(0) if m else None
+
+
+async def download_video_from_url(url):
+    """Download a video using yt-dlp. Returns local file path. Raises RuntimeError on failure."""
+    temp_dir = get_media_temp_dir()
+    uid = uuid.uuid4().hex
+    out_template = os.path.join(temp_dir, f"{uid}.%(ext)s")
+
+    proc = await asyncio.create_subprocess_exec(
+        "yt-dlp",
+        "--no-playlist",
+        "--max-filesize", "100m",
+        "-o", out_template,
+        url,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        raise RuntimeError("yt-dlp timed out after 120s")
+
+    if proc.returncode != 0:
+        err = stderr.decode(errors="replace")[:400]
+        raise RuntimeError(f"yt-dlp failed (code {proc.returncode}): {err}")
+
+    for fname in os.listdir(temp_dir):
+        if fname.startswith(uid + "."):
+            return os.path.join(temp_dir, fname)
+
+    raise RuntimeError("yt-dlp succeeded but output file not found")
 
 
 def get_media_temp_dir() -> str:
@@ -298,6 +358,32 @@ def is_text_file(filename: str) -> bool:
 def is_image_file(filename: str) -> bool:
     _, ext = os.path.splitext(filename.lower())
     return ext in IMAGE_EXTENSIONS
+
+
+def is_inbox_file(filename: str) -> bool:
+    _, ext = os.path.splitext(filename.lower())
+    return ext in INBOX_EXTENSIONS
+
+
+async def save_inbox_file(bot, file_id: str, filename: str) -> str:
+    """Download a Telegram document to the persistent inbox dir. Returns saved path.
+    Unlike download_telegram_file, the file is kept (never cleaned up)."""
+    import re
+    from datetime import datetime
+
+    inbox_dir = os.path.expanduser(FILE_INBOX_DIR)
+    os.makedirs(inbox_dir, exist_ok=True)
+
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", filename) or "file.bin"
+    dest_path = os.path.join(inbox_dir, safe_name)
+    if os.path.exists(dest_path):
+        base, ext = os.path.splitext(safe_name)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest_path = os.path.join(inbox_dir, f"{base}_{stamp}{ext}")
+
+    tg_file = await bot.get_file(file_id)
+    await tg_file.download_to_drive(dest_path)
+    return dest_path
 
 
 async def read_text_file(local_path: str, filename: str) -> str:
