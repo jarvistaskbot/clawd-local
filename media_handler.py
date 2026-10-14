@@ -59,6 +59,7 @@ async def download_video_from_url(url):
     uid = uuid.uuid4().hex
     out_template = os.path.join(temp_dir, f"{uid}.%(ext)s")
 
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     proc = await asyncio.create_subprocess_exec(
         "yt-dlp",
         "--no-playlist",
@@ -67,6 +68,7 @@ async def download_video_from_url(url):
         url,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=env,
     )
     try:
         _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
