@@ -772,11 +772,12 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-    text = update.message.text
+    text = update.effective_message.text if update.effective_message else None
     if not text:
         return
 
-    thread_id = _get_message_thread_id(update.message)
+    effective_msg = update.effective_message
+    thread_id = _get_message_thread_id(effective_msg)
     sender = update.effective_user
     sender_name = sender.username or sender.full_name or str(user_id)
 
@@ -785,7 +786,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id=chat_id,
         direction="in",
         content=text,
-        telegram_message_id=update.message.message_id,
+        telegram_message_id=effective_msg.message_id if effective_msg else None,
         thread_id=thread_id,
         sender_id=user_id,
         sender_name=sender_name,
@@ -799,8 +800,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         get_or_create_project_chat_session(user_id, thread_project)
 
     # Reply-to-message context
-    if update.message.reply_to_message and update.message.reply_to_message.text:
-        quoted = update.message.reply_to_message.text[:500]
+    reply_msg = effective_msg.reply_to_message if effective_msg else None
+    if reply_msg and reply_msg.text:
+        quoted = reply_msg.text[:500]
         text = f"[Replying to: {quoted}]\n\n{text}"
 
     # Video URL detection: download + analyze before queuing

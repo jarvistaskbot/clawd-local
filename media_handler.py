@@ -71,7 +71,7 @@ async def download_video_from_url(url):
         env=env,
     )
     try:
-        _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+        _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
     except asyncio.TimeoutError:
         try:
             proc.kill()
